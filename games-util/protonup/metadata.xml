@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+  <maintainer type="person">
+    <email>dev@turbo.ooo</email>
+    <name>Turbo</name>
+  </maintainer>
+  <longdescription lang="en">
+    CLI program and API to automate the installation and update of GloriousEggroll's Proton-GE
+  </longdescription>
+  <upstream>
+    <remote-id type="github">AUNaseef/protonup</remote-id>
+  </upstream>
+</pkgmetadata>
