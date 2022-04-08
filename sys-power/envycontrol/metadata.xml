@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "http://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>dev@turbo.ooo</email>
+		<name>Turbo</name>
+	</maintainer>
+	<longdescription lang="en">
+	EnvyControl is a program aimed to provide an easy way to switch GPU
+	modes on Nvidia Optimus systems (i.e laptops with Intel + Nvidia or AMD + Nvidia configurations)
+	under Linux.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">geminis3/envycontrol</remote-id>
+		<remote-id type="pypi">configparser</remote-id>
+	</upstream>
+</pkgmetadata>
