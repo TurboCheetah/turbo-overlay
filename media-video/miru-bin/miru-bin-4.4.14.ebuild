@@ -9,7 +9,7 @@ SRC_URI="https://github.com/ThaUnknown/miru/releases/download/v${PV}/linux-Miru-
 
 LICENSE="GPL-3"
 SLOT="0"
-KEYWORDS="~amd64 ~x86"
+KEYWORDS="amd64"
 
 RDEPEND="x11-misc/xdg-utils"
 DEPEND="${RDEPEND}"
