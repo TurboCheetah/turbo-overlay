@@ -2,7 +2,7 @@ EAPI=8
 
 inherit unpacker desktop xdg-utils
 
-PV="5.5.4"
+PV="5.5.6"
 DESCRIPTION="BitTorrent streaming software for streaming anime torrents"
 HOMEPAGE="https://github.com/ThaUnknown/miru"
 SRC_URI="https://github.com/ThaUnknown/miru/releases/download/v${PV}/linux-Miru-${PV}.deb"
