@@ -1,7 +1,10 @@
+# Copyright 1999-2024 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
 EAPI=8
 
-inherit unpacker desktop xdg-utils
-PV="6.4.4"
+inherit unpacker desktop xdg
+
 DESCRIPTION="BitTorrent streaming software for streaming anime torrents"
 HOMEPAGE="https://hayase.watch/"
 SRC_URI="https://github.com/hayase-app/ui/releases/download/v${PV}/linux-hayase-${PV}-linux.deb"
@@ -11,7 +14,6 @@ SLOT="0"
 KEYWORDS="~amd64"
 
 RDEPEND="x11-misc/xdg-utils"
-DEPEND="${RDEPEND}"
 
 S="${WORKDIR}"
 

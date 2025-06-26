@@ -1,8 +1,10 @@
+# Copyright 1999-2024 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
 EAPI=8
 
-inherit unpacker desktop xdg-utils
+inherit unpacker desktop xdg
 
-PV="6.3.9"
 DESCRIPTION="BitTorrent streaming software for streaming anime torrents"
 HOMEPAGE="https://github.com/ThaUnknown/miru"
 SRC_URI="https://github.com/ThaUnknown/miru/releases/download/v${PV}/linux-hayase-${PV}-linux.deb"
@@ -12,7 +14,6 @@ SLOT="0"
 KEYWORDS="~amd64"
 
 RDEPEND="x11-misc/xdg-utils"
-DEPEND="${RDEPEND}"
 
 S="${WORKDIR}"
 
