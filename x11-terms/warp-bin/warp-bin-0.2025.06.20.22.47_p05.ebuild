@@ -32,7 +32,6 @@ RDEPEND="
 	sys-libs/zlib
 "
 
-
 QA_PREBUILT="opt/warpdotdev/*"
 
 src_unpack() {
