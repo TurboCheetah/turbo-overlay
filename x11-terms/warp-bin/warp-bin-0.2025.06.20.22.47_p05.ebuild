@@ -3,7 +3,7 @@
 
 EAPI=8
 
-inherit unpacker desktop xdg-utils
+inherit unpacker desktop xdg
 
 MY_PV="0.2025.06.20.22.47.stable_05"
 DESCRIPTION="The Agentic Development Environment"
@@ -32,7 +32,6 @@ RDEPEND="
 	sys-libs/zlib
 "
 
-DEPEND="${RDEPEND}"
 
 QA_PREBUILT="opt/warpdotdev/*"
 
