@@ -3,39 +3,22 @@
 
 EAPI=8
 
-inherit unpacker desktop xdg
-
-DESCRIPTION="Performance of web Discord with comfort of Discord Desktop"
+DESCRIPTION="DEPRECATED: Use net-im/vesktop from the GURU overlay instead"
 HOMEPAGE="https://github.com/Vencord/Vesktop"
-SRC_URI="https://github.com/Vencord/Vesktop/releases/download/v${PV}/vesktop_${PV}_amd64.deb"
-S="${WORKDIR}"
 
-LICENSE="GPL-3"
+LICENSE="metapackage"
 SLOT="0"
-
 KEYWORDS="~amd64"
 
-RDEPEND="x11-misc/xdg-utils x11-libs/libnotify"
-
-src_unpack() {
-	unpacker_src_unpack
-}
-
-src_install() {
-	insinto /opt/Vesktop
-	doins -r opt/Vesktop/*
-	dosym ../opt/Vesktop/vesktop /usr/bin/vesktop
-	fperms 0755 /opt/Vesktop/vesktop
-
-	domenu "${WORKDIR}/usr/share/applications/vesktop.desktop" || die "Failed to install .desktop file"
-}
-
-pkg_postinst() {
-	xdg_desktop_database_update
-	xdg_mimeinfo_database_update
-}
-
-pkg_postrm() {
-	xdg_desktop_database_update
-	xdg_mimeinfo_database_update
+pkg_setup() {
+	ewarn
+	ewarn "This package has been deprecated and moved to the GURU overlay."
+	ewarn "Please install net-im/vesktop from the GURU overlay instead:"
+	ewarn
+	ewarn "  1. Add the GURU overlay: eselect repository enable guru"
+	ewarn "  2. Sync: emerge --sync guru"
+	ewarn "  3. Install: emerge net-im/vesktop"
+	ewarn "  4. Uninstall this package: emerge --unmerge net-im/vesktop-bin"
+	ewarn
+	die "Package deprecated - use net-im/vesktop from GURU overlay"
 }
