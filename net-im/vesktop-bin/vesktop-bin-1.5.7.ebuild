@@ -7,7 +7,7 @@ inherit unpacker desktop xdg
 
 DESCRIPTION="Performance of web Discord with comfort of Discord Desktop"
 HOMEPAGE="https://github.com/Vencord/Vesktop"
-SRC_URI="https://github.com/Vencord/Vesktop/releases/download/v${PV}/VencordDesktop_${PV}_amd64.deb"
+SRC_URI="https://github.com/Vencord/Vesktop/releases/download/v${PV}/vesktop_${PV}_amd64.deb"
 S="${WORKDIR}"
 
 LICENSE="GPL-3"
@@ -24,10 +24,10 @@ src_unpack() {
 src_install() {
 	insinto /opt/Vesktop
 	doins -r opt/Vesktop/*
-	dosym ../opt/Vesktop/vencorddesktop /usr/bin/vencord-desktop
-	fperms 0755 /opt/Vesktop/vencorddesktop
+	dosym ../opt/Vesktop/vesktop /usr/bin/vesktop
+	fperms 0755 /opt/Vesktop/vesktop
 
-	domenu "${WORKDIR}/usr/share/applications/vencorddesktop.desktop" || die "Failed to install .desktop file"
+	domenu "${WORKDIR}/usr/share/applications/vesktop.desktop" || die "Failed to install .desktop file"
 }
 
 pkg_postinst() {
