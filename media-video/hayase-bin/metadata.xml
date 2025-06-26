@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		BitTorrent streaming software for streaming anime torrents.
+		Allows you to stream anime directly from torrents without
+		downloading the entire file first.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">hayase-app/ui</remote-id>
+		<bugs-to>https://github.com/hayase-app/ui/issues</bugs-to>
+	</upstream>
+</pkgmetadata>

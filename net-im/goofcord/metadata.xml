@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Highly configurable and privacy minded Discord client.
+		GoofCord gives users control over their Discord experience
+		with extensive customization options and privacy features.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">Milkshiift/GoofCord</remote-id>
+		<bugs-to>https://github.com/Milkshiift/GoofCord/issues</bugs-to>
+	</upstream>
+</pkgmetadata>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Vesktop gives you the performance of web Discord and the comfort 
+		of Discord Desktop. It's a cross-platform Discord client with 
+		enhanced features and improved performance.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">Vencord/Vesktop</remote-id>
+		<bugs-to>https://github.com/Vencord/Vesktop/issues</bugs-to>
+	</upstream>
+</pkgmetadata>

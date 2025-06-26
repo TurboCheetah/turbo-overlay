@@ -4,6 +4,10 @@
 	<maintainer type="person">
 		<email>james@thegreatmcpain.xyz</email>
 	</maintainer>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
 	<upstream>
 		<remote-id type="github">DadSchoorse/vkBasalt</remote-id>
 	</upstream>
