@@ -1,8 +1,10 @@
+# Copyright 1999-2024 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
 EAPI=8
 
-inherit unpacker desktop xdg-utils
+inherit unpacker desktop xdg
 
-PV="0.4.4"
 DESCRIPTION="Vesktop gives you the performance of web Discord and the comfort of Discord Desktop"
 HOMEPAGE="https://github.com/Vencord/Vesktop"
 SRC_URI="https://github.com/Vencord/Vesktop/releases/download/v${PV}/VencordDesktop_${PV}_amd64.deb"
@@ -12,7 +14,6 @@ SLOT="0"
 KEYWORDS="~amd64"
 
 RDEPEND="x11-misc/xdg-utils x11-libs/libnotify"
-DEPEND="${RDEPEND}"
 
 S="${WORKDIR}"
 
