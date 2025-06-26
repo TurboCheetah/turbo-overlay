@@ -1,8 +1,10 @@
+# Copyright 1999-2024 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
 EAPI=8
 
-inherit unpacker desktop xdg-utils
+inherit unpacker desktop xdg
 
-PV="1.6.0"
 DESCRIPTION="Take control of your Discord experience with GoofCord – a highly configurable and privacy minded discord client."
 HOMEPAGE="https://github.com/Milkshiift/GoofCord"
 SRC_URI="https://github.com/Milkshiift/GoofCord/releases/download/v${PV}/GoofCord-${PV}-linux-amd64.deb"
@@ -12,7 +14,6 @@ SLOT="0"
 KEYWORDS="~amd64"
 
 RDEPEND="x11-misc/xdg-utils"
-DEPEND="${RDEPEND}"
 
 S="${WORKDIR}"
 
