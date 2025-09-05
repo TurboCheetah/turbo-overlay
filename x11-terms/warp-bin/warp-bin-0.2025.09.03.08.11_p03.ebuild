@@ -5,7 +5,7 @@ EAPI=8
 
 inherit unpacker desktop xdg
 
-MY_PV="0.2025.08.13.08.12.stable_02"
+MY_PV="0.2025.09.03.08.11.stable_03"
 DESCRIPTION="The Agentic Development Environment"
 HOMEPAGE="https://www.warp.dev/"
 SRC_URI="https://releases.warp.dev/stable/v${MY_PV}/warp-terminal-v${MY_PV}-1-x86_64.pkg.tar.zst"
