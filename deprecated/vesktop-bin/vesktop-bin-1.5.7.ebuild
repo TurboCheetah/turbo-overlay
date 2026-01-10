@@ -1,4 +1,4 @@
-# Copyright 1999-2024 Gentoo Authors
+# Copyright 1999-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
@@ -18,7 +18,7 @@ pkg_setup() {
 	ewarn "  1. Add the GURU overlay: eselect repository enable guru"
 	ewarn "  2. Sync: emerge --sync guru"
 	ewarn "  3. Install: emerge net-im/vesktop"
-	ewarn "  4. Uninstall this package: emerge --unmerge net-im/vesktop-bin"
+	ewarn "  4. Uninstall this package: emerge --unmerge deprecated/vesktop-bin"
 	ewarn
 	die "Package deprecated - use net-im/vesktop from GURU overlay"
 }
