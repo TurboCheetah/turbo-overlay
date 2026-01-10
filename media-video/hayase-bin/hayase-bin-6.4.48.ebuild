@@ -6,14 +6,17 @@ EAPI=8
 inherit unpacker desktop xdg
 
 DESCRIPTION="BitTorrent streaming software for streaming anime torrents"
-HOMEPAGE="https://github.com/ThaUnknown/miru"
-SRC_URI="https://github.com/ThaUnknown/miru/releases/download/v${PV}/linux-hayase-${PV}-linux.deb"
+HOMEPAGE="https://hayase.watch/"
+SRC_URI="https://api.hayase.watch/files/linux-hayase-${PV}-linux.deb"
 S="${WORKDIR}"
 
 LICENSE="GPL-3"
 SLOT="0"
 
 KEYWORDS="~amd64"
+
+RESTRICT="strip"
+QA_PREBUILT="opt/Hayase/*"
 
 RDEPEND="x11-misc/xdg-utils"
 
@@ -24,7 +27,7 @@ src_unpack() {
 src_install() {
 	insinto /opt/Hayase
 	doins -r opt/Hayase/*
-	dosym ../opt/Hayase/hayase /usr/bin/hayase
+	dosym -r /opt/Hayase/hayase /usr/bin/hayase
 	fperms 0755 /opt/Hayase/hayase
 
 	domenu "${WORKDIR}/usr/share/applications/hayase.desktop" || die "Failed to install .desktop file"
