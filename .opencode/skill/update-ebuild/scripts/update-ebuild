@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Configuration constants
+readonly SCRIPT_NAME=$(basename "$0")
+readonly ERR_INVALID_VERSION=10
+readonly ERR_INVALID_PATH=20
+readonly ERR_NO_EBUILD=30
+
+# ANSI Color constants
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[0;33m'
+readonly BLUE='\033[0;34m'
+readonly RESET='\033[0m'
+
+# Simplified regex patterns
+readonly STRICT_VERSION_REGEX="^[0-9]+(\.[0-9]+)*([a-z])?(_p[0-9]+)?(_alpha[0-9]+)?(_beta[0-9]+)?(_pre[0-9]+)?(_rc[0-9]+)?(-r[0-9]+)?$"
+readonly PERMISSIVE_VERSION_REGEX="^v?[0-9]+([.][0-9a-zA-Z_-]+)*$"
+readonly ARCH_SUFFIX="^(.+)-[0-9]+-[a-zA-Z0-9_]+$"
+readonly STABLE_SUFFIX="^(.+)\.stable_([0-9]+)$"
+readonly COMPLEX_SUFFIX="^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.([a-zA-Z0-9_]+)$"
+
+# Colored logging with timestamps
+log_error() { printf "${RED}[%s] [ERROR]${RESET} %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$1" >&2; }
+log_warn()  { printf "${YELLOW}[%s] [WARN]${RESET} %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$1" >&2; }
+log_info()  { printf "${BLUE}[%s] [INFO]${RESET} %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$1" >&2; }
+log_success() { printf "${GREEN}[%s] [SUCCESS]${RESET} %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$1" >&2; }
+
+# Detect privilege escalation command
+detect_priv_cmd() {
+    if command -v doas &>/dev/null && [[ -f /etc/doas.conf ]]; then
+        echo "doas"
+    elif command -v sudo &>/dev/null; then
+        echo "sudo"
+    else
+        echo ""
+    fi
+}
+
+readonly PRIV_CMD=$(detect_priv_cmd)
+
+usage() {
+    cat >&2 << EOF
+Usage: $SCRIPT_NAME [OPTIONS] -v VERSION path/to/package
+
+Update a Gentoo ebuild to a new version.
+
+OPTIONS:
+  -v VERSION   New version (required)
+               Gentoo format: 1.2.3, 1.2.3_p1, 1.2.3_alpha1, 1.2.3_rc2
+               With -l flag: v1.2.3, 1.2.3.stable_01, etc.
+  -m MY_PV     Set MY_PV for upstream version mapping (e.g., for warp-bin)
+  -n           Dry run - show what would be done without making changes
+  -s           Skip git operations
+  -l           Lenient mode - allow non-standard version formats
+  -k           Keep old ebuild (don't remove oldest version)
+  -h           Show this help message
+
+EXAMPLES:
+  # Simple version bump
+  $SCRIPT_NAME -v 1.2.3 media-video/hayase-bin
+
+  # Complex version with MY_PV (like warp-bin)
+  $SCRIPT_NAME -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+
+  # Dry run to preview changes
+  $SCRIPT_NAME -n -v 2.0.0 net-im/goofcord
+
+  # Keep old version (for maintaining multiple versions)
+  $SCRIPT_NAME -k -v 1.3.0 games-util/vkbasalt
+
+EOF
+    exit 1
+}
+
+cleanup() {
+    [[ -d "${TEMP_DIR:-}" ]] && rm -rf "$TEMP_DIR" && log_info "Temporary backup files cleaned up."
+}
+
+# Version processing pipeline
+strip_v_prefix() { echo "${1#v}"; }
+
+extract_core_version() {
+    local version="$1" quiet="${2:-false}"
+    if [[ "$version" =~ $ARCH_SUFFIX ]]; then
+        local core="${BASH_REMATCH[1]}"
+        [[ "$quiet" != true ]] && log_info "Extracted core version '$core' from '$version'"
+        echo "$core"; return 0
+    fi
+    echo "$version"
+}
+
+convert_stable_suffix() {
+    local version="$1" quiet="${2:-false}"
+    if [[ "$version" =~ $STABLE_SUFFIX ]]; then
+        local core="${BASH_REMATCH[1]}" stable="${BASH_REMATCH[2]}"
+        local normalized="${core}_p${stable}"
+        [[ "$quiet" != true ]] && log_info "Converted '.stable_${stable}' to '_p${stable}'"
+        [[ "$quiet" != true ]] && log_info "Normalized version '$normalized' from '$version'"
+        echo "$normalized"; return 0
+    fi
+    echo "$version"
+}
+
+strip_complex_suffix() {
+    local version="$1" quiet="${2:-false}"
+    if [[ "$version" =~ $COMPLEX_SUFFIX ]]; then
+        local core="${BASH_REMATCH[1]}" suffix="${BASH_REMATCH[2]}"
+        # Don't strip valid Gentoo suffixes like _p03, _alpha1, etc.
+        if [[ "$suffix" =~ ^_[a-z]+[0-9]+$ ]]; then
+            echo "$version"; return 0
+        fi
+        [[ "$quiet" != true ]] && log_warn "Stripping problematic suffix '$suffix'"
+        [[ "$quiet" != true ]] && log_info "Using core version '$core'"
+        echo "$core"; return 0
+    fi
+    echo "$version"
+}
+
+validate_and_normalize() {
+    local original_version="$1"
+    local lenient_mode="${2:-false}"
+    local version="$original_version"
+
+    # Validation
+    if [[ "$lenient_mode" = true ]]; then
+        if ! [[ $version =~ $PERMISSIVE_VERSION_REGEX ]]; then
+            log_error "Invalid version format even in lenient mode."
+            log_error "Version should start with a number and contain only alphanumerics, dots, hyphens, or underscores."
+            log_error "Your version: '$version'"
+            exit $ERR_INVALID_VERSION
+        fi
+    else
+        if ! [[ $version =~ $STRICT_VERSION_REGEX ]]; then
+            log_error "Invalid version format. Expected standard Gentoo format like:"
+            log_error "  1.2.3, 1.2.3a, 1.2.3_p1, 1.2.3_alpha1, 1.2.3_beta2, 1.2.3_rc3, 1.2.3-r1"
+            log_error "Your version: '$version'"
+            log_error "Hint: Use -l flag for lenient mode to allow non-standard formats"
+            exit $ERR_INVALID_VERSION
+        fi
+    fi
+
+    # Normalization pipeline
+    version=$(strip_v_prefix "$version")
+    if [[ "$lenient_mode" = true ]]; then
+        version=$(extract_core_version "$version")
+        version=$(convert_stable_suffix "$version")
+
+        # Only strip complex suffixes if version doesn't match Gentoo format after processing
+        if ! [[ $version =~ $STRICT_VERSION_REGEX ]]; then
+            version=$(strip_complex_suffix "$version")
+            log_warn "Version '$original_version' is not Gentoo-compliant, but accepted in lenient mode."
+            log_warn "Architecture-specific suffixes should ideally be handled in SRC_URI, not in ebuild filename."
+        fi
+    fi
+    echo "$version"
+}
+
+validate_ebuild_path() {
+    local path="$1"
+    [[ -z "$path" ]] && { log_error "Ebuild path cannot be empty."; return 1; }
+
+    local abs_path
+    abs_path=$(realpath "$path" 2>/dev/null) || {
+        log_error "Cannot resolve ebuild path: '$path'"; return 1
+    }
+
+    [[ -d "$abs_path" ]] || { log_error "Ebuild path is not a directory: '$abs_path'"; return 1; }
+    [[ -w "$abs_path" ]] || { log_error "Ebuild directory is not writable: '$abs_path'"; return 1; }
+
+    # System directory protection
+    case "$abs_path" in
+        "/bin"|"/sbin"|"/usr/bin"|"/usr/sbin"|"/etc"|"/boot"|"/lib"|"/lib64"|"/proc"|"/sys"|"/dev")
+            log_error "Cannot operate on system directory: '$abs_path'"; return 1 ;;
+    esac
+    echo "$abs_path"; return 0
+}
+
+find_ebuild_files() {
+    local ebuilds
+    # Use version sort for proper ordering (handles 1.9 < 1.10)
+    ebuilds=$(find . -maxdepth 1 -name '*.ebuild' -printf '%f\n' | sort -V)
+    [[ -z "$ebuilds" ]] && { log_error "No ebuild files found in directory."; exit $ERR_NO_EBUILD; }
+
+    local oldest latest
+    oldest=$(echo "$ebuilds" | head -n 1)
+    latest=$(echo "$ebuilds" | tail -n 1)
+
+    # Return relative paths
+    echo "./${oldest}|./${latest}"
+}
+
+update_my_pv() {
+    local ebuild="$1" my_pv="$2"
+    if grep -q '^MY_PV=' "$ebuild"; then
+        sed -i "s/^MY_PV=.*/MY_PV=\"${my_pv}\"/" "$ebuild"
+        log_info "Updated MY_PV to '$my_pv' in $ebuild"
+        return 0
+    fi
+    return 1
+}
+
+prepare_ebuild_files() {
+    local latest="$1" new_name="$2" my_pv="$3" oldest="$4" keep_old="$5"
+
+    # Backup
+    cp "$latest" "${TEMP_DIR}/$(basename "$latest").bak"
+    cp Manifest "${TEMP_DIR}/Manifest.bak"
+
+    # Create new ebuild
+    cp "$latest" "$new_name"
+
+    # Update MY_PV if provided
+    if [[ -n "$my_pv" ]]; then
+        update_my_pv "$new_name" "$my_pv"
+    fi
+
+    # Remove oldest if different and not keeping
+    local deleted_oldest=""
+    if [[ "$keep_old" = false && "$oldest" != "$latest" ]]; then
+        deleted_oldest="$oldest"
+        rm -f "$oldest"
+        sed -i "/$(basename "$oldest")/d" Manifest
+        log_info "Removed old ebuild: $oldest"
+    fi
+
+    log_success "Ebuild created: $new_name"
+    echo "$deleted_oldest"
+}
+
+update_manifest() {
+    local ebuild="$1"
+    local cmd
+
+    if [[ -n "$PRIV_CMD" ]]; then
+        cmd="$PRIV_CMD ebuild"
+    else
+        cmd="ebuild"
+    fi
+
+    if ! $cmd "$ebuild" clean manifest install; then
+        log_error "Failed to generate new Manifest entry."
+        log_warn "You may need to run: ebuild $ebuild manifest"
+        return 1
+    fi
+    log_success "Manifest updated for $ebuild"
+    return 0
+}
+
+handle_git_operations() {
+    local ebuild_path="$1" normalized="$2" old="$3" dry="$4" deleted_oldest="$5" new_name="$6"
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        log_info "Not a git repository. Skipping git operations."
+        return
+    fi
+
+    local category
+    category=$(echo "$ebuild_path" | awk -F'/' '{print $(NF-1)"/"$NF}')
+
+    local commit_msg="$category: add $normalized"
+    [[ -n "$deleted_oldest" ]] && commit_msg+=", drop $old"
+
+    if [[ "$dry" = true ]]; then
+        log_info "Dry run: Would commit with message: '$commit_msg'"
+        return
+    fi
+
+    read -p "Commit these changes? (y/n) " -n 1 -r; echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        git add "$new_name" Manifest
+        [[ -n "$deleted_oldest" ]] && git add "$deleted_oldest"
+        git commit -m "$commit_msg"
+        log_success "Changes committed: '$commit_msg'"
+    else
+        log_info "Changes not committed."
+    fi
+}
+
+main() {
+    # Parse arguments
+    local version="" ebuild_path="" dry_run=false skip_git=false lenient=false keep_old=false my_pv=""
+    while getopts ":v:m:nslkh" opt; do
+        case $opt in
+            v) version=$OPTARG ;;
+            m) my_pv=$OPTARG ;;
+            n) dry_run=true ;;
+            s) skip_git=true ;;
+            l) lenient=true ;;
+            k) keep_old=true ;;
+            h) usage ;;
+            *) usage ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    # Validate arguments
+    [[ -z "$version" ]] && { log_error "Version not provided. Use -v VERSION"; usage; }
+    [[ $# -eq 0 ]] && { log_error "Ebuild path not provided."; usage; }
+
+    # Process version
+    local normalized
+    normalized=$(validate_and_normalize "$version" "$lenient")
+
+    # Validate path
+    local abs_path
+    abs_path=$(validate_ebuild_path "$1") || usage
+    cd "$abs_path" || exit 1
+
+    # Setup temp directory
+    TEMP_DIR=$(mktemp -d)
+    trap cleanup EXIT
+
+    # Find ebuilds
+    local ebuild_files
+    ebuild_files=$(find_ebuild_files)
+    local oldest="${ebuild_files%|*}" latest="${ebuild_files#*|}"
+
+    # Check if new version already exists
+    local pkg_name
+    pkg_name=$(basename "$latest" | sed -E "s/-[^-]*\.ebuild$//")
+    local new_name="${pkg_name}-${normalized}.ebuild"
+
+    if [[ -f "$new_name" ]]; then
+        log_error "Ebuild already exists: $new_name"
+        exit 1
+    fi
+
+    # Get old version for commit message
+    local old_version
+    old_version=$(basename "$oldest" | sed -E "s/.*-([^-]*)\.ebuild$/\1/")
+
+    # Execute
+    if [[ "$dry_run" = true ]]; then
+        log_info "Dry run: Would create $new_name from $latest"
+        [[ -n "$my_pv" ]] && log_info "Dry run: Would set MY_PV='$my_pv'"
+        [[ "$keep_old" = false && "$oldest" != "$latest" ]] && log_info "Dry run: Would remove $oldest"
+        log_info "Dry run: Would update Manifest"
+        [[ "$skip_git" = false ]] && handle_git_operations "$abs_path" "$normalized" "$old_version" "$dry_run" "" "$new_name"
+        log_info "Dry run completed. No changes made."
+    else
+        local deleted_oldest
+        deleted_oldest=$(prepare_ebuild_files "$latest" "$new_name" "$my_pv" "$oldest" "$keep_old")
+        if ! update_manifest "$new_name"; then
+            log_warn "Manifest update failed, but continuing with git operations"
+        fi
+        [[ "$skip_git" = false ]] && handle_git_operations "$abs_path" "$normalized" "$old_version" "$dry_run" "$deleted_oldest" "$new_name"
+        log_success "Operation completed successfully."
+    fi
+}
+
+main "$@"
