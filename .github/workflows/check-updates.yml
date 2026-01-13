@@ -49,7 +49,7 @@ jobs:
             ARGS="--package ${{ inputs.package }}"
           fi
 
-          .opencode/skill/check-updates/scripts/check-updates $ARGS --json > updates.json 2>/dev/null || true
+          .opencode/skill/overlay-tools/bin/check-updates $ARGS --json > updates.json 2>/dev/null || true
 
           echo "Updates found:"
           cat updates.json | jq -r '.[] | select(.status=="update-available") | "\(.category)/\(.name): \(.current_version) -> \(.latest_version)"'
@@ -115,7 +115,7 @@ jobs:
 
           echo "Running: update-ebuild ${ARGS[*]} $ATOM"
 
-          .opencode/skill/update-ebuild/scripts/update-ebuild "${ARGS[@]}" "$ATOM" || {
+          .opencode/skill/overlay-tools/bin/update-ebuild "${ARGS[@]}" "$ATOM" || {
             echo "::warning::Failed to create PR for $ATOM"
             exit 0
           }
