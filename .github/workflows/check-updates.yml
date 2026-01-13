@@ -1,0 +1,138 @@
+name: Check Updates
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no PRs created)"
+        type: boolean
+        default: false
+      package:
+        description: "Specific package to check (e.g., net-im/goofcord)"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      updates_json: ${{ steps.check.outputs.updates }}
+      has_updates: ${{ steps.check.outputs.has_updates }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Check for updates
+        id: check
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.package }}" ]; then
+            ARGS="--package ${{ inputs.package }}"
+          fi
+
+          .opencode/skill/check-updates/scripts/check-updates $ARGS --json > updates.json 2>&1 || true
+
+          echo "Updates found:"
+          cat updates.json | jq -r '.[] | select(.status=="update-available") | "\(.category)/\(.name): \(.current_version) -> \(.latest_version)"'
+
+          HAS_UPDATES=$(jq 'any(.[]; .status=="update-available")' updates.json)
+          echo "has_updates=$HAS_UPDATES" >> "$GITHUB_OUTPUT"
+
+          UPDATES=$(cat updates.json | jq -c '[.[] | select(.status=="update-available")]')
+          echo "updates=$UPDATES" >> "$GITHUB_OUTPUT"
+
+      - name: Upload updates artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updates
+          path: updates.json
+
+  create-prs:
+    needs: check-updates
+    if: needs.check-updates.outputs.has_updates == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        update: ${{ fromJson(needs.check-updates.outputs.updates_json) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create PR for ${{ matrix.update.category }}/${{ matrix.update.name }}
+        env:
+          CATEGORY: ${{ matrix.update.category }}
+          NAME: ${{ matrix.update.name }}
+          VERSION: ${{ matrix.update.latest_version }}
+          MY_PV: ${{ matrix.update.my_pv }}
+          UPSTREAM_URL: ${{ matrix.update.latest_url }}
+        run: |
+          ATOM="${CATEGORY}/${NAME}"
+          echo "Processing $ATOM -> $VERSION"
+
+          # --skip-manifest because ubuntu-latest doesn't have ebuild command
+          ARGS=("--pr" "--base" "master" "--version" "$VERSION" "--skip-manifest")
+
+          if [ -n "$MY_PV" ] && [ "$MY_PV" != "null" ]; then
+            ARGS+=("--my-pv" "$MY_PV")
+          fi
+
+          if [ -n "$UPSTREAM_URL" ] && [ "$UPSTREAM_URL" != "null" ]; then
+            ARGS+=("--upstream-url" "$UPSTREAM_URL")
+          fi
+
+          echo "Running: update-ebuild ${ARGS[*]} $ATOM"
+
+          .opencode/skill/update-ebuild/scripts/update-ebuild "${ARGS[@]}" "$ATOM" || {
+            echo "::warning::Failed to create PR for $ATOM"
+            exit 0
+          }
+
+  summary:
+    needs: [check-updates, create-prs]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Summary
+        run: |
+          echo "## Update Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.check-updates.outputs.has_updates }}" == "true" ]; then
+            echo "Updates were found and PRs were created (or already exist)." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No updates available. All packages are up to date." >> $GITHUB_STEP_SUMMARY
+          fi

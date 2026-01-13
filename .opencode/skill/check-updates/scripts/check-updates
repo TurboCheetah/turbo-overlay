@@ -14,4 +14,4 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 127
 fi
 
-exec uv run --project "$OVERLAY_TOOLS_DIR" python -m overlay_tools.cli.update_ebuild "$@"
+exec uv run --project "$OVERLAY_TOOLS_DIR" python -m overlay_tools.cli.check_updates "$@"
