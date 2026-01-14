@@ -286,13 +286,20 @@ def main(argv: list[str] | None = None) -> int:
     should_commit = args.yes or args.pr
 
     if not should_commit:
-        try:
-            from rich.prompt import Confirm
+        if not sys.stdin.isatty():
+            log.info("Non-interactive mode detected, skipping commit (use -y to commit)")
+            should_commit = False
+        else:
+            try:
+                from rich.prompt import Confirm
 
-            should_commit = Confirm.ask("Commit these changes?", default=False)
-        except ImportError:
-            response = input("Commit these changes? [y/N] ").strip().lower()
-            should_commit = response == "y"
+                should_commit = Confirm.ask("Commit these changes?", default=False)
+            except (ImportError, EOFError):
+                try:
+                    response = input("Commit these changes? [y/N] ").strip().lower()
+                    should_commit = response == "y"
+                except EOFError:
+                    should_commit = False
 
     if should_commit:
         git_add(paths_to_add, repo_root)
