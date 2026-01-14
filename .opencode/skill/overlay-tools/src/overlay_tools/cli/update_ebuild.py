@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from functools import cmp_to_key
 from pathlib import Path
 
 from overlay_tools.core.ebuilds import (
@@ -25,7 +26,7 @@ from overlay_tools.core.git_utils import (
 )
 from overlay_tools.core.logging import Logger, set_logger
 from overlay_tools.core.subprocess_utils import run_ebuild_manifest
-from overlay_tools.core.versions import normalize_gentoo_version
+from overlay_tools.core.versions import compare_versions, normalize_gentoo_version
 
 
 def generate_branch_name(category: str, name: str, version: str) -> str:
@@ -186,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         log.error("No non-live ebuilds found")
         return 1
 
-    oldest = min(ebuilds, key=lambda e: e.pv) if len(ebuilds) > 1 else latest
+    oldest = min(ebuilds, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv))) if len(ebuilds) > 1 else latest
     category = pkg_path.parent.name
     name = pkg_path.name
 
