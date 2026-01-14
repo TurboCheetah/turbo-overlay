@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Any
 
 
 @dataclass
@@ -220,7 +219,7 @@ def _render_plain(packages: list[PackageStatus]) -> None:
         elif pkg.status == "error":
             print(f"✗  {pkg.atom}")
             print(f"   {pkg.current_version}")
-            print(f"   Error: {pkg.error_message}")
+            print(f"   Error: {pkg.error_message or 'Unknown error'}")
             counts["errors"] += 1
         else:
             print(f"?  {pkg.atom}")

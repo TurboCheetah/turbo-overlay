@@ -129,12 +129,19 @@ jobs:
 
     steps:
       - name: Summary
+        env:
+          HAS_UPDATES: ${{ needs.check-updates.outputs.has_updates }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           echo "## Update Check Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${{ needs.check-updates.outputs.has_updates }}" == "true" ]; then
-            echo "Updates were found and PRs were created (or already exist)." >> $GITHUB_STEP_SUMMARY
+          if [ "$HAS_UPDATES" == "true" ]; then
+            if [ "$DRY_RUN" == "true" ]; then
+              echo "Updates were found but this was a dry run; PRs were not created." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "Updates were found and PRs were created (or already exist)." >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "No updates available. All packages are up to date." >> $GITHUB_STEP_SUMMARY
           fi

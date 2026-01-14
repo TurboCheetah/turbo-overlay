@@ -122,3 +122,31 @@ class TestGitBranchExists:
         with patch("overlay_tools.core.git_utils.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             assert git_branch_exists("feature/test", tmp_path, remote=True) is False
+
+
+class TestGitRoot:
+    def test_returns_repo_root_path(self, tmp_path):
+        with patch("overlay_tools.core.git_utils.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="/home/user/repo\n")
+            result = git_root(tmp_path)
+            assert result == Path("/home/user/repo")
+
+    def test_strips_whitespace(self, tmp_path):
+        with patch("overlay_tools.core.git_utils.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="  /home/user/repo  \n")
+            result = git_root(tmp_path)
+            assert result == Path("/home/user/repo")
+
+
+class TestGitStatus:
+    def test_returns_status_output(self, tmp_path):
+        with patch("overlay_tools.core.git_utils.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="M file.txt\nA new.txt\n")
+            result = git_status(tmp_path)
+            assert result == "M file.txt\nA new.txt\n"
+
+    def test_returns_empty_for_clean_repo(self, tmp_path):
+        with patch("overlay_tools.core.git_utils.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="")
+            result = git_status(tmp_path)
+            assert result == ""

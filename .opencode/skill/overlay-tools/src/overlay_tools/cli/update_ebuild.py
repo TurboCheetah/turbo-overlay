@@ -323,59 +323,60 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        gh_require_available()
-    except Exception as e:
-        log.error(str(e))
-        log.info("Commit was created but PR was not. Push manually and create PR.")
-        return 1
+        try:
+            gh_require_available()
+        except Exception as e:
+            log.error(str(e))
+            log.info("Commit was created but PR was not. Push manually and create PR.")
+            return 1
 
-    log.info(f"Pushing {feature_branch}...")
-    try:
-        git_push(repo_root, branch=feature_branch, set_upstream=True)
-        log.success("Pushed to origin")
-    except Exception as e:
-        log.error(f"Push failed: {e}")
-        return 1
+        log.info(f"Pushing {feature_branch}...")
+        try:
+            git_push(repo_root, branch=feature_branch, set_upstream=True)
+            log.success("Pushed to origin")
+        except Exception as e:
+            log.error(f"Push failed: {e}")
+            return 1
 
-    existing_pr = gh_find_pr_by_head(repo_root, head=feature_branch, base=base_branch)
-    if existing_pr:
-        log.success(f"PR already exists: {existing_pr.url}")
-        return 0
+        existing_pr = gh_find_pr_by_head(repo_root, head=feature_branch, base=base_branch)
+        if existing_pr:
+            log.success(f"PR already exists: {existing_pr.url}")
+            return 0
 
-    pr_title = commit_msg
-    pr_body = generate_pr_body(
-        category=category,
-        name=name,
-        old_version=latest.pv,
-        new_version=normalized_version,
-        my_pv=args.my_pv,
-        upstream_url=args.upstream_url,
-        dropped_version=dropped_version,
-    )
-
-    log.info("Creating PR...")
-    try:
-        pr = gh_create_pr(
-            repo_root,
-            title=pr_title,
-            body=pr_body,
-            head=feature_branch,
-            base=base_branch,
-            draft=args.draft,
+        pr_title = commit_msg
+        pr_body = generate_pr_body(
+            category=category,
+            name=name,
+            old_version=latest.pv,
+            new_version=normalized_version,
+            my_pv=args.my_pv,
+            upstream_url=args.upstream_url,
+            dropped_version=dropped_version,
         )
-        log.success(f"PR created: {pr.url}")
-    except Exception as e:
-        log.error(f"PR creation failed: {e}")
-        log.info(f"Branch {feature_branch} was pushed. Create PR manually.")
-        return 1
 
-    if original_branch and original_branch != feature_branch:
-        log.info(f"Switching back to {original_branch}")
-        git_checkout_branch(original_branch, repo_root)
+        log.info("Creating PR...")
+        try:
+            pr = gh_create_pr(
+                repo_root,
+                title=pr_title,
+                body=pr_body,
+                head=feature_branch,
+                base=base_branch,
+                draft=args.draft,
+            )
+            log.success(f"PR created: {pr.url}")
+        except Exception as e:
+            log.error(f"PR creation failed: {e}")
+            log.info(f"Branch {feature_branch} was pushed. Create PR manually.")
+            return 1
 
-    log.rule()
-    log.success("Done!")
-    return 0
+        log.rule()
+        log.success("Done!")
+        return 0
+    finally:
+        if original_branch and original_branch != feature_branch:
+            log.info(f"Switching back to {original_branch}")
+            git_checkout_branch(original_branch, repo_root)
 
 
 if __name__ == "__main__":

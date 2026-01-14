@@ -8,7 +8,7 @@ from packaging import version as pkg_version
 
 from overlay_tools.core.errors import VersionError
 
-SuffixType = Literal["alpha", "beta", "pre", "rc", "p", "r", None]
+SuffixType = Literal["alpha", "beta", "pre", "rc", "p", None]
 
 GENTOO_VERSION_RE = re.compile(
     r"^"

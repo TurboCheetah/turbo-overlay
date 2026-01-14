@@ -123,6 +123,10 @@ class TestGhCreatePr:
                     draft=True,
                 )
 
+                assert result.number == 42
+                assert result.url == "https://github.com/owner/repo/pull/42"
+                assert result.state == "DRAFT"
+
                 create_call = mock_run.call_args_list[0]
                 cmd = create_call[0][0]
                 assert "--draft" in cmd

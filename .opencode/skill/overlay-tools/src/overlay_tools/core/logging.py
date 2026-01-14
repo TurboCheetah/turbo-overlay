@@ -197,7 +197,7 @@ class ProgressContext:
             else:
                 self._progress.advance(self._task_id)
         elif not self.logger.quiet and not self.logger._rich:
-            pct = int(self._current / self.total * 100)
+            pct = int(self._current / self.total * 100) if self.total > 0 else 0
             msg = description or self.description
             print(f"\r[{pct:3d}%] {msg}", end="", file=sys.stderr, flush=True)
             if self._current == self.total:
