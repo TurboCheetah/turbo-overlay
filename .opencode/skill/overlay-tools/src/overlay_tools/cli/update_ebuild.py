@@ -244,8 +244,8 @@ def main(argv: list[str] | None = None) -> int:
                         name=name,
                         base=base_branch,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"Could not check for existing PRs: {e}")
 
             if dry_run_existing_pr:
                 log.info(
@@ -276,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
             gh_require_available,
         )
 
+        from overlay_tools.core.errors import ExternalToolMissingError
+
         try:
             gh_require_available()
             existing_pr_ref = gh_find_open_update_pr_for_package(
@@ -285,13 +287,14 @@ def main(argv: list[str] | None = None) -> int:
                 base=base_branch,
             )
             if existing_pr_ref:
-                # Reuse the existing PR's branch
                 feature_branch = existing_pr_ref.head_ref
                 log.info(f"Found existing PR #{existing_pr_ref.number}: {existing_pr_ref.url}")
                 log.info(f"Reusing branch: {feature_branch}")
-        except Exception:
-            # If gh is not available, continue with normal branch creation
+        except ExternalToolMissingError:
             pass
+        except Exception as e:
+            log.warning(f"Could not check for existing PRs: {e}")
+            log.info("Will create new PR if none exists for this branch")
 
         if git_branch_exists(feature_branch, repo_root):
             log.info(f"Checking out existing branch: {feature_branch}")
