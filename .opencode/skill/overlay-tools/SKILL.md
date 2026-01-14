@@ -47,16 +47,16 @@ Scan packages for available upstream updates.
 Bump ebuild versions with optional PR automation.
 
 ```bash
-# Simple version bump
-.opencode/skill/overlay-tools/bin/update-ebuild -v 1.2.3 media-video/hayase-bin
+# Version bump
+.opencode/skill/overlay-tools/bin/update-ebuild -y -v 1.2.3 media-video/hayase-bin
 
 # With MY_PV mapping
-.opencode/skill/overlay-tools/bin/update-ebuild -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+.opencode/skill/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
 
 # Dry run
 .opencode/skill/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
 
-# Create PR automatically
+# Create PR automatically (--pr implies -y)
 .opencode/skill/overlay-tools/bin/update-ebuild --pr -v 3.68.0_pre -m "3.68.0" media-video/lossless-cut
 ```
 
@@ -71,8 +71,8 @@ Bump ebuild versions with optional PR automation.
 | `-l, --lenient` | Allow non-standard version formats |
 | `-k, --keep-old` | Keep old ebuild |
 | `--skip-manifest` | Skip Manifest update (for CI) |
-| `-y, --yes` | Non-interactive mode |
-| `--pr` | Create PR after committing |
+| `-y, --yes` | Auto-commit without prompting |
+| `--pr` | Create PR after committing (implies -y) |
 | `--base BRANCH` | Base branch for PR |
 | `--branch BRANCH` | Override feature branch name |
 | `--draft` | Create PR as draft |

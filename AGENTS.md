@@ -60,16 +60,16 @@ Located at `.opencode/skill/overlay-tools/`. Requires [uv](https://github.com/as
 ### Bump Package Version
 
 ```bash
-# Simple version bump
-.opencode/skill/overlay-tools/bin/update-ebuild -v 1.2.3 category/package
+# Version bump
+.opencode/skill/overlay-tools/bin/update-ebuild -y -v 1.2.3 category/package
 
 # With MY_PV mapping (for packages like warp-bin)
-.opencode/skill/overlay-tools/bin/update-ebuild -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+.opencode/skill/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
 
 # Dry run to preview
 .opencode/skill/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
 
-# Create PR automatically
+# Create PR automatically (--pr implies -y)
 .opencode/skill/overlay-tools/bin/update-ebuild --pr -v 3.68.0_pre -m "3.68.0" media-video/lossless-cut
 ```
 
