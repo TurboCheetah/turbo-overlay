@@ -19,6 +19,7 @@ from overlay_tools.core.git_utils import (
     git_commit,
     git_current_branch,
     git_default_branch,
+    git_fetch_branch,
     git_has_changes,
     git_push,
     git_root,
@@ -29,9 +30,12 @@ from overlay_tools.core.subprocess_utils import run_ebuild_manifest
 from overlay_tools.core.versions import compare_versions, normalize_gentoo_version
 
 
-def generate_branch_name(category: str, name: str, version: str) -> str:
-    safe_version = version.replace(".", "-").replace("_", "-")
-    return f"update/{category}-{name}-{safe_version}"
+def generate_branch_name(category: str, name: str) -> str:
+    """Generate a package-scoped branch name (version-agnostic).
+
+    This allows reusing the same branch/PR for multiple version updates.
+    """
+    return f"update/{category}-{name}"
 
 
 def generate_pr_body(
@@ -187,7 +191,11 @@ def main(argv: list[str] | None = None) -> int:
         log.error("No non-live ebuilds found")
         return 1
 
-    oldest = min(ebuilds, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv))) if len(ebuilds) > 1 else latest
+    oldest = (
+        min(ebuilds, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv)))
+        if len(ebuilds) > 1
+        else latest
+    )
     category = pkg_path.parent.name
     name = pkg_path.name
 
@@ -200,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
 
     repo_root = git_root(pkg_path) if is_git_repo(pkg_path) else pkg_path
     base_branch = args.base or git_default_branch(repo_root)
-    feature_branch = args.branch or generate_branch_name(category, name, normalized_version)
+    feature_branch = args.branch or generate_branch_name(category, name)
     original_branch = git_current_branch(repo_root) if is_git_repo(pkg_path) else None
 
     log.rule("Update Ebuild")
@@ -222,9 +230,34 @@ def main(argv: list[str] | None = None) -> int:
         else:
             log.info("Would update Manifest")
         if args.pr:
-            log.info(f"Would create branch: {feature_branch}")
-            log.info(f"Would push to origin/{feature_branch}")
-            log.info(f"Would create PR: {category}/{name}: add {normalized_version}")
+            from overlay_tools.core.gh_utils import (
+                gh_find_open_update_pr_for_package,
+                gh_is_available,
+            )
+
+            dry_run_existing_pr = None
+            if gh_is_available() and is_git_repo(pkg_path):
+                try:
+                    dry_run_existing_pr = gh_find_open_update_pr_for_package(
+                        repo_root,
+                        category=category,
+                        name=name,
+                        base=base_branch,
+                    )
+                except Exception:
+                    pass
+
+            if dry_run_existing_pr:
+                log.info(
+                    f"Found existing PR #{dry_run_existing_pr.number}: {dry_run_existing_pr.url}"
+                )
+                log.info(f"Would reuse branch: {dry_run_existing_pr.head_ref}")
+                log.info(f"Would push to origin/{dry_run_existing_pr.head_ref}")
+                log.info(f"Would update PR: {category}/{name}: add {normalized_version}")
+            else:
+                log.info(f"Would create branch: {feature_branch}")
+                log.info(f"Would push to origin/{feature_branch}")
+                log.info(f"Would create PR: {category}/{name}: add {normalized_version}")
         elif not args.skip_git and is_git_repo(pkg_path):
             msg = f"{category}/{name}: add {normalized_version}"
             if not args.keep_old and oldest != latest:
@@ -233,10 +266,40 @@ def main(argv: list[str] | None = None) -> int:
         log.success("Dry run complete - no changes made")
         return 0
 
+    # Track whether we're updating an existing PR
+    existing_pr_ref = None
+
     if args.pr and is_git_repo(pkg_path):
+        # Check for existing open PR for this package (any version)
+        from overlay_tools.core.gh_utils import (
+            gh_find_open_update_pr_for_package,
+            gh_require_available,
+        )
+
+        try:
+            gh_require_available()
+            existing_pr_ref = gh_find_open_update_pr_for_package(
+                repo_root,
+                category=category,
+                name=name,
+                base=base_branch,
+            )
+            if existing_pr_ref:
+                # Reuse the existing PR's branch
+                feature_branch = existing_pr_ref.head_ref
+                log.info(f"Found existing PR #{existing_pr_ref.number}: {existing_pr_ref.url}")
+                log.info(f"Reusing branch: {feature_branch}")
+        except Exception:
+            # If gh is not available, continue with normal branch creation
+            pass
+
         if git_branch_exists(feature_branch, repo_root):
-            log.warning(f"Branch {feature_branch} already exists locally")
+            log.info(f"Checking out existing branch: {feature_branch}")
             git_checkout_branch(feature_branch, repo_root)
+        elif git_branch_exists(feature_branch, repo_root, remote=True):
+            # Branch exists on remote but not locally (CI scenario)
+            log.info(f"Fetching remote branch: {feature_branch}")
+            git_checkout_branch(feature_branch, repo_root, track_remote=True)
         else:
             log.info(f"Creating branch: {feature_branch}")
             git_checkout_branch(feature_branch, repo_root, create=True, start_point=base_branch)
@@ -319,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from overlay_tools.core.gh_utils import (
         gh_create_pr,
-        gh_find_pr_by_head,
+        gh_edit_pr,
         gh_require_available,
     )
 
@@ -339,11 +402,6 @@ def main(argv: list[str] | None = None) -> int:
             log.error(f"Push failed: {e}")
             return 1
 
-        existing_pr = gh_find_pr_by_head(repo_root, head=feature_branch, base=base_branch)
-        if existing_pr:
-            log.success(f"PR already exists: {existing_pr.url}")
-            return 0
-
         pr_title = commit_msg
         pr_body = generate_pr_body(
             category=category,
@@ -355,21 +413,35 @@ def main(argv: list[str] | None = None) -> int:
             dropped_version=dropped_version,
         )
 
-        log.info("Creating PR...")
-        try:
-            pr = gh_create_pr(
-                repo_root,
-                title=pr_title,
-                body=pr_body,
-                head=feature_branch,
-                base=base_branch,
-                draft=args.draft,
-            )
-            log.success(f"PR created: {pr.url}")
-        except Exception as e:
-            log.error(f"PR creation failed: {e}")
-            log.info(f"Branch {feature_branch} was pushed. Create PR manually.")
-            return 1
+        if existing_pr_ref:
+            log.info(f"Updating existing PR #{existing_pr_ref.number}...")
+            try:
+                gh_edit_pr(
+                    repo_root,
+                    number=existing_pr_ref.number,
+                    title=pr_title,
+                    body=pr_body,
+                )
+                log.success(f"PR updated: {existing_pr_ref.url}")
+            except Exception as e:
+                log.warning(f"PR update failed: {e}")
+                log.info(f"Changes were pushed. Update PR manually: {existing_pr_ref.url}")
+        else:
+            log.info("Creating PR...")
+            try:
+                pr = gh_create_pr(
+                    repo_root,
+                    title=pr_title,
+                    body=pr_body,
+                    head=feature_branch,
+                    base=base_branch,
+                    draft=args.draft,
+                )
+                log.success(f"PR created: {pr.url}")
+            except Exception as e:
+                log.error(f"PR creation failed: {e}")
+                log.info(f"Branch {feature_branch} was pushed. Create PR manually.")
+                return 1
 
         log.rule()
         log.success("Done!")

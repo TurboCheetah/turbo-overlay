@@ -51,13 +51,57 @@ def git_default_branch(repo_root: Path) -> str:
     return "master"
 
 
+def git_fetch_branch(repo_root: Path, branch: str, *, remote: str = "origin") -> bool:
+    """Fetch a specific branch from remote. Returns True if successful."""
+    result = run(
+        ["git", "fetch", remote, branch],
+        cwd=repo_root,
+        check=False,
+        capture=True,
+    )
+    return result.returncode == 0
+
+
 def git_checkout_branch(
     branch: str,
     repo_root: Path,
     *,
     create: bool = False,
     start_point: str | None = None,
+    track_remote: bool = False,
 ) -> None:
+    """Checkout a branch, optionally creating it or tracking a remote.
+
+    Args:
+        branch: Branch name to checkout
+        repo_root: Repository root path
+        create: Create a new branch (-b flag)
+        start_point: Starting point for new branch
+        track_remote: If branch doesn't exist locally, try to track origin/<branch>
+    """
+    # If tracking remote requested, fetch and setup tracking
+    if track_remote and not create:
+        # Check if branch exists locally
+        local_exists = run(
+            ["git", "rev-parse", "--verify", branch],
+            cwd=repo_root,
+            check=False,
+            capture=True,
+        ).returncode == 0
+
+        if not local_exists:
+            # Try to fetch and checkout tracking the remote
+            git_fetch_branch(repo_root, branch)
+            result = run(
+                ["git", "checkout", "--track", f"origin/{branch}"],
+                cwd=repo_root,
+                check=False,
+                capture=True,
+            )
+            if result.returncode == 0:
+                return
+            # Fall through to normal checkout if tracking failed
+
     cmd = ["git", "checkout"]
     if create:
         cmd.append("-b")
