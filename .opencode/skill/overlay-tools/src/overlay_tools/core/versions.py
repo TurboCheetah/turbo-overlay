@@ -57,6 +57,10 @@ class GentooVersion:
             s += f".post{self.suffix_num or 0}"
         if self.letter:
             s += f"+{self.letter}"
+            if self.revision is not None:
+                s += f".r{self.revision}"
+        elif self.revision is not None:
+            s += f"+r{self.revision}"
         return s
 
 
