@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from functools import cmp_to_key
 from pathlib import Path
 from typing import NamedTuple
 
@@ -81,4 +82,4 @@ def select_latest_ebuild(ebuilds: list[EbuildName], exclude_live: bool = True) -
     if not candidates:
         return None
 
-    return max(candidates, key=lambda e: (compare_versions(e.pv, "0"), e.pv))
+    return max(candidates, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv)))

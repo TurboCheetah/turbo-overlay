@@ -43,10 +43,12 @@ jobs:
 
       - name: Check for updates
         id: check
+        env:
+          PACKAGE: ${{ inputs.package }}
         run: |
           ARGS=""
-          if [ -n "${{ inputs.package }}" ]; then
-            ARGS="--package ${{ inputs.package }}"
+          if [ -n "$PACKAGE" ]; then
+            ARGS="--package $PACKAGE"
           fi
 
           .opencode/skill/overlay-tools/bin/check-updates $ARGS --json > updates.json 2>/dev/null || true
