@@ -45,8 +45,6 @@ class GentooVersion:
 
     def to_pep440(self) -> str:
         s = self.base
-        if self.letter:
-            s += self.letter
         if self.suffix_type == "alpha":
             s += f"a{self.suffix_num or 0}"
         elif self.suffix_type == "beta":
@@ -57,6 +55,8 @@ class GentooVersion:
             s += f".dev{self.suffix_num or 0}"
         elif self.suffix_type == "p":
             s += f".post{self.suffix_num or 0}"
+        if self.letter:
+            s += f"+{self.letter}"
         return s
 
 
