@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OVERLAY_TOOLS_DIR="$(dirname "$SCRIPT_DIR")"
+
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+RESET='\033[0m'
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo -e "${RED}error:${RESET} uv is required but not installed" >&2
+    echo -e "${CYAN}install:${RESET} curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    exit 127
+fi
+
+exec uv run --project "$OVERLAY_TOOLS_DIR" python -m overlay_tools.cli.check_updates "$@"

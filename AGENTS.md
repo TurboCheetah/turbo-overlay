@@ -40,6 +40,45 @@ ebuild path/to/ebuild clean setup unpack prepare configure compile install
 
 ---
 
+## Overlay Maintenance Tools
+
+Located at `.opencode/skill/overlay-tools/`. Requires [uv](https://github.com/astral-sh/uv).
+
+### Check for Updates
+
+```bash
+# Check all packages for upstream updates
+.opencode/skill/overlay-tools/bin/check-updates
+
+# Check specific package
+.opencode/skill/overlay-tools/bin/check-updates -p net-im/goofcord
+
+# JSON output (for scripting)
+.opencode/skill/overlay-tools/bin/check-updates --json
+```
+
+### Bump Package Version
+
+```bash
+# Version bump
+.opencode/skill/overlay-tools/bin/update-ebuild -y -v 1.2.3 category/package
+
+# With MY_PV mapping (for packages like warp-bin)
+.opencode/skill/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+
+# Dry run to preview
+.opencode/skill/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
+
+# Create PR automatically (--pr implies -y)
+.opencode/skill/overlay-tools/bin/update-ebuild --pr -v 3.68.0_pre -m "3.68.0" media-video/lossless-cut
+```
+
+### Automated Updates (GitHub Actions)
+
+The workflow at `.github/workflows/check-updates.yml` runs weekly to check for updates and create PRs automatically.
+
+---
+
 ## Code Style Guidelines
 
 ### Variable Declaration Order (Strict)
