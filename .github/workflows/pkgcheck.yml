@@ -1,0 +1,21 @@
+name: pkgcheck
+
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run pkgcheck
+        uses: pkgcore/pkgcheck-action@v1
+        with:
+          args: --keywords=-RedundantVersion,-NonsolvableDepsInDev
