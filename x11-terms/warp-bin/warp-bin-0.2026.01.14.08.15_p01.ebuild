@@ -33,6 +33,10 @@ RDEPEND="
 	virtual/opengl
 "
 
+BDEPEND="
+	app-arch/zstd
+"
+
 QA_PREBUILT="opt/warpdotdev/*"
 
 src_unpack() {
