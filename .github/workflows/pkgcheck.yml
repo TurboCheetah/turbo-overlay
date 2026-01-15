@@ -15,6 +15,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
 
+      - name: Cache pkgcheck
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pkgcore
+            ~/.cache/pkgcheck
+          key: pkgcheck-${{ github.run_id }}
+          restore-keys: pkgcheck-
+
       - name: Run pkgcheck
         uses: pkgcore/pkgcheck-action@v1
         with:
