@@ -75,6 +75,9 @@ jobs:
     container:
       image: gentoo/stage3:latest
       options: --user root
+    env:
+      PORTAGE_BINHOST: "https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/"
+      EMERGE_DEFAULT_OPTS: "--getbinpkg=y --usepkg=y --binpkg-respect-use=y"
     strategy:
       fail-fast: false
       matrix:
@@ -85,6 +88,7 @@ jobs:
         run: |
           emerge-webrsync
           emerge --quiet --noreplace dev-vcs/git app-misc/ca-certificates net-misc/curl
+          emerge --info | grep -E "(BINHOST|EMERGE_DEFAULT_OPTS|FEATURES)" || true
 
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
