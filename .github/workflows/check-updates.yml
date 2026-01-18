@@ -78,6 +78,7 @@ jobs:
     env:
       PORTAGE_BINHOST: "https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/"
       EMERGE_DEFAULT_OPTS: "--getbinpkg=y --usepkg=y --binpkg-respect-use=y"
+      FEATURES: "-binpkg-request-signature -binpkg-verify-signature"
     strategy:
       fail-fast: false
       matrix:
