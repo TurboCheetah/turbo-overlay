@@ -72,12 +72,20 @@ jobs:
     needs: check-updates
     if: needs.check-updates.outputs.has_updates == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
+    container:
+      image: gentoo/stage3:latest
+      options: --user root
     strategy:
       fail-fast: false
       matrix:
         update: ${{ fromJson(needs.check-updates.outputs.updates_json) }}
 
     steps:
+      - name: Install dependencies
+        run: |
+          emerge-webrsync
+          emerge --quiet --noreplace dev-vcs/git app-misc/ca-certificates net-misc/curl
+
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
@@ -87,6 +95,14 @@ jobs:
         uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7
         with:
           version: "latest"
+
+      - name: Install gh
+        env:
+          GH_VERSION: "2.45.0"
+        run: |
+          curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          tar -C /tmp -xzf /tmp/gh.tar.gz
+          install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
 
       - name: Configure git
         run: |
@@ -104,8 +120,7 @@ jobs:
           ATOM="${CATEGORY}/${NAME}"
           echo "Processing $ATOM -> $VERSION"
 
-          # --skip-manifest because ubuntu-latest doesn't have ebuild command
-          ARGS=("--pr" "--base" "master" "--version" "$VERSION" "--skip-manifest")
+          ARGS=("--pr" "--base" "master" "--version" "$VERSION")
 
           if [ -n "$MY_PV" ] && [ "$MY_PV" != "null" ]; then
             ARGS+=("--my-pv" "$MY_PV")
