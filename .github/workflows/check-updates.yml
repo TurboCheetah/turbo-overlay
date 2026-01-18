@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         run: |
           emerge-webrsync
-          export FEATURES="${FEATURES:-} -binpkg-request-signature -binpkg-verify-signature"
+          export FEATURES="${FEATURES:-} binpkg-ignore-signature"
           emerge --quiet --noreplace dev-vcs/git app-misc/ca-certificates net-misc/curl
           emerge --info | grep -E "(BINHOST|EMERGE_DEFAULT_OPTS|FEATURES)" || true
 
