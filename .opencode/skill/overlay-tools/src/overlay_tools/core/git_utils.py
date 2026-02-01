@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from overlay_tools.core.errors import ExternalToolMissingError
 from overlay_tools.core.subprocess_utils import run
 
 
@@ -15,7 +16,10 @@ def is_git_repo(path: Path) -> bool:
         )
         return result.returncode == 0
     except FileNotFoundError:
-        return False
+        raise ExternalToolMissingError(
+            "git",
+            "Install git: emerge dev-vcs/git / apt install git / brew install git"
+        )
 
 
 def git_root(path: Path) -> Path:
@@ -82,12 +86,15 @@ def git_checkout_branch(
     # If tracking remote requested, fetch and setup tracking
     if track_remote and not create:
         # Check if branch exists locally
-        local_exists = run(
-            ["git", "rev-parse", "--verify", branch],
-            cwd=repo_root,
-            check=False,
-            capture=True,
-        ).returncode == 0
+        local_exists = (
+            run(
+                ["git", "rev-parse", "--verify", branch],
+                cwd=repo_root,
+                check=False,
+                capture=True,
+            ).returncode
+            == 0
+        )
 
         if not local_exists:
             # Try to fetch and checkout tracking the remote
