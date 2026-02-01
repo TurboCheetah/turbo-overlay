@@ -114,6 +114,12 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Verify git is available
+        run: |
+          which git || (echo "ERROR: git not found in PATH" && exit 1)
+          git --version
+          git rev-parse --is-inside-work-tree || (echo "ERROR: not in a git repository" && exit 1)
+
       - name: Create PR for ${{ matrix.update.category }}/${{ matrix.update.name }}
         env:
           CATEGORY: ${{ matrix.update.category }}
@@ -138,8 +144,8 @@ jobs:
           echo "Running: update-ebuild ${ARGS[*]} $ATOM"
 
           .opencode/skill/overlay-tools/bin/update-ebuild "${ARGS[@]}" "$ATOM" || {
-            echo "::warning::Failed to create PR for $ATOM"
-            exit 0
+            echo "::error::Failed to create PR for $ATOM - check logs above for details"
+            exit 1
           }
 
   summary:
