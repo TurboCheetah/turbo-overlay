@@ -342,6 +342,17 @@ die "Fatal error description"  # Exit with error
 - Bump: `foo-1.1.ebuild` → `foo-1.2.ebuild` (upstream source changed)
 - Revision: `foo-1.1.ebuild` → `foo-1.1-r1.ebuild` (ebuild-only changes)
 
+### Version Retention Policy
+**Keep at least 3 previous versions** of each package in the overlay.
+
+When adding a new version:
+1. Add the new version ebuild
+2. Update the Manifest
+3. Only remove old versions if there are **4+ versions** already present
+4. Commit message format when dropping: `category/package: add X.Y.Z, drop A.B.C`
+
+This provides users with rollback options and stability.
+
 ---
 
 ## EAPI 8 Features
