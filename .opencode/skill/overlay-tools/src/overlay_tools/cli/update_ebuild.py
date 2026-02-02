@@ -207,15 +207,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     repo_root = git_root(pkg_path) if is_git_repo(pkg_path) else pkg_path
+    is_git = is_git_repo(pkg_path)
     base_branch = args.base or git_default_branch(repo_root)
     feature_branch = args.branch or generate_branch_name(category, name)
-    original_branch = git_current_branch(repo_root) if is_git_repo(pkg_path) else None
+    original_branch = git_current_branch(repo_root) if is_git else None
 
     log.rule("Update Ebuild")
     log.package(category, name, "version bump")
     log.version_change(latest.pv, normalized_version)
-
     if args.pr:
+        if is_git:
+            log.info(f"Git repository: {repo_root}")
+        else:
+            log.warning(f"Not in a git repository: {repo_root}")
         log.info(f"Branch: {feature_branch}")
         log.info(f"Base: {base_branch}")
 
@@ -236,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
             dry_run_existing_pr = None
-            if gh_is_available() and is_git_repo(pkg_path):
+            if gh_is_available() and is_git:
                 try:
                     dry_run_existing_pr = gh_find_open_update_pr_for_package(
                         repo_root,
@@ -258,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
                 log.info(f"Would create branch: {feature_branch}")
                 log.info(f"Would push to origin/{feature_branch}")
                 log.info(f"Would create PR: {category}/{name}: add {normalized_version}")
-        elif not args.skip_git and is_git_repo(pkg_path):
+        elif not args.skip_git and is_git:
             msg = f"{category}/{name}: add {normalized_version}"
             if not args.keep_old and oldest != latest:
                 msg += f", drop {oldest.pv}"
@@ -269,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     # Track whether we're updating an existing PR
     existing_pr_ref = None
 
-    if args.pr and is_git_repo(pkg_path):
+    if args.pr and is_git:
         # Check for existing open PR for this package (any version)
         from overlay_tools.core.gh_utils import (
             gh_find_open_update_pr_for_package,
@@ -335,8 +339,13 @@ def main(argv: list[str] | None = None) -> int:
             log.warning(f"Manifest update failed: {e}")
             log.info(f"Run manually: ebuild {new_path} manifest")
 
-    if args.skip_git or not is_git_repo(pkg_path):
+    if args.skip_git or not is_git:
         log.rule()
+        if args.skip_git:
+            log.info("Git operations skipped (--skip-git)")
+        else:
+            log.warning(f"Not a git repository: {pkg_path}")
+            log.info("Changes were made but not committed. Run manually from a git repo.")
         log.success("Done!")
         return 0
 

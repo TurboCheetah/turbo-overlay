@@ -7,6 +7,17 @@ from overlay_tools.core.subprocess_utils import run
 
 
 def is_git_repo(path: Path) -> bool:
+    """Check if the given path is inside a git repository.
+    
+    Args:
+        path: Path to check
+        
+    Returns:
+        True if path is inside a git work tree, False otherwise
+        
+    Raises:
+        ExternalToolMissingError: If git command is not found in PATH
+    """
     try:
         result = run(
             ["git", "rev-parse", "--is-inside-work-tree"],
