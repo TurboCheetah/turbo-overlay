@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">mountain-loop/yaak</remote-id>
+		<bugs-to>https://github.com/mountain-loop/yaak/issues</bugs-to>
+	</upstream>
+</pkgmetadata>
