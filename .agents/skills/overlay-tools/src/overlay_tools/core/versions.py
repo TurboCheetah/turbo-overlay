@@ -21,6 +21,7 @@ GENTOO_VERSION_RE = re.compile(
 
 STABLE_SUFFIX_RE = re.compile(r"^(?P<base>.+)\.stable_(?P<num>\d+)$")
 V_PREFIX_RE = re.compile(r"^[vV]")
+PREFIXED_VERSION_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*[-_](?P<version>\d.*)$")
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,9 @@ def normalize_gentoo_version(v: str, lenient: bool = False) -> str:
 def normalize_upstream_version(tag: str) -> str:
     tag = V_PREFIX_RE.sub("", tag)
     tag = re.sub(r"^release-", "", tag)
+    prefixed_match = PREFIXED_VERSION_RE.match(tag)
+    if prefixed_match:
+        tag = prefixed_match.group("version")
     return tag.strip()
 
 

@@ -86,9 +86,12 @@ class GitHubClient:
 
         try:
             data = json.loads(cache_path.read_text())
+            tag = data["tag"]
             return ReleaseInfo(
-                tag=data["tag"],
-                version=data["version"],
+                tag=tag,
+                # Re-normalize from the tag so stale cache entries remain valid
+                # after normalization logic changes.
+                version=normalize_upstream_version(tag),
                 url=data.get("url", ""),
             )
         except (json.JSONDecodeError, KeyError, OSError):

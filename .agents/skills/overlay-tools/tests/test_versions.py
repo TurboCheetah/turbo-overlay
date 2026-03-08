@@ -5,6 +5,7 @@ from overlay_tools.core.versions import (
     GentooVersion,
     compare_versions,
     normalize_gentoo_version,
+    normalize_upstream_version,
     parse_gentoo_version,
     upstream_to_gentoo,
 )
@@ -96,6 +97,26 @@ class TestCompareVersions:
 
     def test_different_segment_counts(self):
         assert compare_versions("1.2.3.4", "1.2.3") == 1
+
+    def test_equal_after_prefixed_tag_normalization(self):
+        assert compare_versions("3.3.1", normalize_upstream_version("ipinfo-3.3.1")) == 0
+
+
+class TestNormalizeUpstreamVersion:
+    def test_strips_v_prefix(self):
+        assert normalize_upstream_version("v1.2.3") == "1.2.3"
+
+    def test_strips_release_prefix(self):
+        assert normalize_upstream_version("release-1.2.3") == "1.2.3"
+
+    def test_strips_package_prefix_with_dash(self):
+        assert normalize_upstream_version("ipinfo-3.3.1") == "3.3.1"
+
+    def test_strips_package_prefix_with_underscore(self):
+        assert normalize_upstream_version("cli_1.2.3") == "1.2.3"
+
+    def test_keeps_non_numeric_suffix_tags(self):
+        assert normalize_upstream_version("release-candidate") == "candidate"
 
 
 class TestUpstreamToGentoo:
