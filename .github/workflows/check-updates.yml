@@ -27,6 +27,7 @@ jobs:
   check-updates:
     runs-on: ubuntu-latest
     outputs:
+      results_json: ${{ steps.check.outputs.results }}
       updates_json: ${{ steps.check.outputs.updates }}
       has_updates: ${{ steps.check.outputs.has_updates }}
 
@@ -58,6 +59,9 @@ jobs:
 
           HAS_UPDATES=$(jq 'any(.[]; .status=="update-available")' updates.json)
           echo "has_updates=$HAS_UPDATES" >> "$GITHUB_OUTPUT"
+
+          RESULTS=$(cat updates.json | jq -c '.')
+          echo "results=$RESULTS" >> "$GITHUB_OUTPUT"
 
           UPDATES=$(cat updates.json | jq -c '[.[] | select(.status=="update-available")]')
           echo "updates=$UPDATES" >> "$GITHUB_OUTPUT"
@@ -176,16 +180,53 @@ jobs:
         env:
           HAS_UPDATES: ${{ needs.check-updates.outputs.has_updates }}
           DRY_RUN: ${{ inputs.dry_run }}
+          UPDATES_JSON: ${{ needs.check-updates.outputs.updates_json }}
+          RESULTS_JSON: ${{ needs.check-updates.outputs.results_json }}
         run: |
-          echo "## Update Check Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          {
+            cat <<EOF
+          ## Update Check Summary
 
-          if [ "$HAS_UPDATES" == "true" ]; then
-            if [ "$DRY_RUN" == "true" ]; then
-              echo "Updates were found but this was a dry run; PRs were not created." >> $GITHUB_STEP_SUMMARY
+          EOF
+
+            if [ "$HAS_UPDATES" = "true" ]; then
+              if [ "$DRY_RUN" = "true" ]; then
+                cat <<EOF
+          Updates were found but this was a dry run; PRs were not created.
+
+          ### Available Updates
+
+          | Package | Current | Latest | Upstream |
+          | --- | --- | --- | --- |
+          EOF
+              else
+                cat <<EOF
+          Updates were found and PRs were created (or already exist).
+
+          ### Available Updates
+
+          | Package | Current | Latest | Upstream |
+          | --- | --- | --- | --- |
+          EOF
+              fi
+
+              jq -r '.[] | "| \(.category)/\(.name) | `\(.current_version)` | `\(.latest_version)` | " + (if .latest_url then "[release](\(.latest_url))" else "-" end) + " |"' <<<"$UPDATES_JSON"
             else
-              echo "Updates were found and PRs were created (or already exist)." >> $GITHUB_STEP_SUMMARY
+              cat <<EOF
+          No updates available. All packages are up to date.
+          EOF
             fi
-          else
-            echo "No updates available. All packages are up to date." >> $GITHUB_STEP_SUMMARY
-          fi
+
+            manual_count=$(jq '[.[] | select(.status=="manual-check")] | length' <<<"$RESULTS_JSON")
+            if [ "$manual_count" -gt 0 ]; then
+              cat <<EOF
+
+          ### Manual Checks
+
+          | Package | Current | Check |
+          | --- | --- | --- |
+          EOF
+              jq -r '.[] | select(.status=="manual-check") | "| \(.category)/\(.name) | `\(.current_version)` | " + (if .custom_url then "[link](\(.custom_url))" else "-" end) + " |"' <<<"$RESULTS_JSON"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
