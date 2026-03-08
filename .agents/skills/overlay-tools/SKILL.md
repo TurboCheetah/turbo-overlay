@@ -31,6 +31,9 @@ Scan packages for available upstream updates.
 .agents/skills/overlay-tools/bin/check-updates --json
 ```
 
+If a package is reported as `manual-check`, see
+`.agents/skills/overlay-tools/docs/manual-update-checks.md`.
+
 **Options:**
 
 | Flag | Description |
