@@ -51,7 +51,7 @@ jobs:
             ARGS="--package $PACKAGE"
           fi
 
-          .opencode/skill/overlay-tools/bin/check-updates $ARGS --json > updates.json 2>/dev/null || true
+          .agents/skills/overlay-tools/bin/check-updates $ARGS --json > updates.json
 
           echo "Updates found:"
           cat updates.json | jq -r '.[] | select(.status=="update-available") | "\(.category)/\(.name): \(.current_version) -> \(.latest_version)"'
@@ -78,23 +78,25 @@ jobs:
     env:
       PORTAGE_BINHOST: "https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64/"
       EMERGE_DEFAULT_OPTS: "--getbinpkg=y --usepkg=y --binpkg-respect-use=y"
-    strategy:
-      fail-fast: false
-      matrix:
-        update: ${{ fromJson(needs.check-updates.outputs.updates_json) }}
+      UPDATES_JSON: ${{ needs.check-updates.outputs.updates_json }}
 
     steps:
       - name: Install dependencies
         run: |
           emerge-webrsync
           export FEATURES="${FEATURES:-} binpkg-ignore-signature"
-          emerge --quiet --noreplace dev-vcs/git app-misc/ca-certificates net-misc/curl
+          emerge --quiet --noreplace dev-vcs/git app-misc/ca-certificates net-misc/curl app-misc/jq
           emerge --info | grep -E "(BINHOST|EMERGE_DEFAULT_OPTS|FEATURES)" || true
 
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
           fetch-depth: 0
+
+      - name: Trust workspace for git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --get-all safe.directory
 
       - name: Install uv
         uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7
@@ -120,33 +122,49 @@ jobs:
           git --version
           git rev-parse --is-inside-work-tree || (echo "ERROR: not in a git repository" && exit 1)
 
-      - name: Create PR for ${{ matrix.update.category }}/${{ matrix.update.name }}
-        env:
-          CATEGORY: ${{ matrix.update.category }}
-          NAME: ${{ matrix.update.name }}
-          VERSION: ${{ matrix.update.latest_version }}
-          MY_PV: ${{ matrix.update.my_pv }}
-          UPSTREAM_URL: ${{ matrix.update.latest_url }}
+      - name: Create PRs
+        shell: bash
         run: |
-          ATOM="${CATEGORY}/${NAME}"
-          echo "Processing $ATOM -> $VERSION"
+          set -euo pipefail
 
-          ARGS=("--pr" "--base" "master" "--version" "$VERSION")
+          updates_file="$(mktemp)"
+          printf '%s\n' "${UPDATES_JSON}" > "${updates_file}"
 
-          if [ -n "$MY_PV" ] && [ "$MY_PV" != "null" ]; then
-            ARGS+=("--my-pv" "$MY_PV")
-          fi
+          failures=0
 
-          if [ -n "$UPSTREAM_URL" ] && [ "$UPSTREAM_URL" != "null" ]; then
-            ARGS+=("--upstream-url" "$UPSTREAM_URL")
-          fi
+          while IFS= read -r update; do
+            CATEGORY="$(jq -r '.category' <<<"${update}")"
+            NAME="$(jq -r '.name' <<<"${update}")"
+            VERSION="$(jq -r '.latest_version' <<<"${update}")"
+            MY_PV="$(jq -r '.my_pv // empty' <<<"${update}")"
+            UPSTREAM_URL="$(jq -r '.latest_url // empty' <<<"${update}")"
+            ATOM="${CATEGORY}/${NAME}"
 
-          echo "Running: update-ebuild ${ARGS[*]} $ATOM"
+            ARGS=("--pr" "--base" "master" "--version" "${VERSION}")
 
-          .opencode/skill/overlay-tools/bin/update-ebuild "${ARGS[@]}" "$ATOM" || {
-            echo "::error::Failed to create PR for $ATOM - check logs above for details"
+            if [[ -n "${MY_PV}" ]]; then
+              ARGS+=("--my-pv" "${MY_PV}")
+            fi
+
+            if [[ -n "${UPSTREAM_URL}" ]]; then
+              ARGS+=("--upstream-url" "${UPSTREAM_URL}")
+            fi
+
+            echo "Processing ${ATOM} -> ${VERSION}"
+            echo "Running: update-ebuild ${ARGS[*]} ${ATOM}"
+
+            if ! .agents/skills/overlay-tools/bin/update-ebuild "${ARGS[@]}" "${ATOM}"; then
+              echo "::error::Failed to create PR for ${ATOM} - check logs above for details"
+              failures=$((failures + 1))
+            fi
+          done < <(jq -c '.[]' "${updates_file}")
+
+          rm -f "${updates_file}"
+
+          if [[ "${failures}" -gt 0 ]]; then
+            echo "::error::${failures} package update(s) failed"
             exit 1
-          }
+          fi
 
   summary:
     needs: [check-updates, create-prs]

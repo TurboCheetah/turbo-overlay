@@ -17,25 +17,25 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### Check for Updates
 
 ```bash
-.opencode/skill/check-updates/scripts/check-updates
+.agents/skills/overlay-tools/bin/check-updates
 ```
 
 ### Bump Package Version
 
 ```bash
-.opencode/skill/update-ebuild/scripts/update-ebuild -v 1.2.3 category/package
+.agents/skills/overlay-tools/bin/update-ebuild -v 1.2.3 category/package
 
 # With PR creation
-.opencode/skill/update-ebuild/scripts/update-ebuild --pr -v 1.2.3 category/package
+.agents/skills/overlay-tools/bin/update-ebuild --pr -v 1.2.3 category/package
 
 # With MY_PV and upstream URL
-.opencode/skill/update-ebuild/scripts/update-ebuild --pr -v 1.2.3 -m "1.2.3" --upstream-url "https://..." category/package
+.agents/skills/overlay-tools/bin/update-ebuild --pr -v 1.2.3 -m "1.2.3" --upstream-url "https://..." category/package
 ```
 
 ## Development
 
 ```bash
-cd .opencode/skill/overlay-tools
+cd .agents/skills/overlay-tools
 
 # Run tests
 uv run pytest
@@ -46,6 +46,7 @@ uv run --extra dev pytest -v
 # Type check (if basedpyright is installed)
 uv run basedpyright src/
 ```
+
 
 ## Architecture
 

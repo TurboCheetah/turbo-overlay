@@ -6,7 +6,9 @@ from pathlib import Path
 from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, select_latest_ebuild
 
 
-SKIP_DIRS = frozenset({"metadata", "profiles", "licenses", "deprecated", ".git", ".opencode"})
+SKIP_DIRS = frozenset(
+    {"metadata", "profiles", "licenses", "deprecated", ".git", ".opencode", ".agents"}
+)
 
 
 @dataclass

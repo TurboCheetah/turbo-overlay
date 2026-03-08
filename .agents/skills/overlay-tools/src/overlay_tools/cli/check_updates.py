@@ -209,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     github_token = os.environ.get("GITHUB_TOKEN")
-    cache_dir = overlay_root / ".opencode" / "skill" / "overlay-tools" / ".cache"
+    cache_dir = overlay_root / ".agents" / "skills" / "overlay-tools" / ".cache"
     github_client = GitHubClient(token=github_token, cache_dir=cache_dir)
 
     packages = find_packages(overlay_root)

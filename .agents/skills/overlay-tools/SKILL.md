@@ -22,13 +22,13 @@ Scan packages for available upstream updates.
 
 ```bash
 # Check all packages
-.opencode/skill/overlay-tools/bin/check-updates
+.agents/skills/overlay-tools/bin/check-updates
 
 # Check specific package
-.opencode/skill/overlay-tools/bin/check-updates -p net-im/goofcord
+.agents/skills/overlay-tools/bin/check-updates -p net-im/goofcord
 
 # JSON output for scripting
-.opencode/skill/overlay-tools/bin/check-updates --json
+.agents/skills/overlay-tools/bin/check-updates --json
 ```
 
 **Options:**
@@ -48,16 +48,16 @@ Bump ebuild versions with optional PR automation.
 
 ```bash
 # Version bump
-.opencode/skill/overlay-tools/bin/update-ebuild -y -v 1.2.3 media-video/hayase-bin
+.agents/skills/overlay-tools/bin/update-ebuild -y -v 1.2.3 media-video/hayase-bin
 
 # With MY_PV mapping
-.opencode/skill/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+.agents/skills/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
 
 # Dry run
-.opencode/skill/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
+.agents/skills/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
 
 # Create PR automatically (--pr implies -y)
-.opencode/skill/overlay-tools/bin/update-ebuild --pr -v 3.68.0_pre -m "3.68.0" media-video/lossless-cut
+.agents/skills/overlay-tools/bin/update-ebuild --pr -v 3.68.0_pre -m "3.68.0" media-video/lossless-cut
 ```
 
 **Options:**
