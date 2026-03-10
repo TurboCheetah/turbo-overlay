@@ -26,7 +26,7 @@ from overlay_tools.core.git_utils import (
     is_git_repo,
 )
 from overlay_tools.core.logging import Logger, set_logger
-from overlay_tools.core.subprocess_utils import run_ebuild_manifest
+from overlay_tools.core.subprocess_utils import run_ebuild_manifest, run_egencache_update
 from overlay_tools.core.versions import compare_versions, normalize_gentoo_version
 
 
@@ -74,6 +74,19 @@ def generate_pr_body(
     lines.append("*This PR was generated automatically by overlay-tools.*")
 
     return "\n".join(lines)
+
+
+def read_repo_name(repo_root: Path) -> str | None:
+    repo_name_path = repo_root / "profiles" / "repo_name"
+    if not repo_name_path.is_file():
+        return None
+
+    repo_name = repo_name_path.read_text(encoding="utf-8").strip()
+    return repo_name or None
+
+
+def metadata_cache_path(repo_root: Path, category: str, name: str, version: str) -> Path:
+    return repo_root / "metadata" / "md5-cache" / category / f"{name}-{version}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -233,6 +246,14 @@ def main(argv: list[str] | None = None) -> int:
             log.info("Would skip Manifest update")
         else:
             log.info("Would update Manifest")
+        repo_name = read_repo_name(repo_root)
+        if repo_name:
+            log.info("Would update metadata/md5-cache")
+            if not args.keep_old and oldest != latest:
+                old_cache_path = metadata_cache_path(repo_root, category, name, oldest.pv)
+                log.info(f"Would remove {old_cache_path.relative_to(repo_root)}")
+        else:
+            log.info("Would skip metadata/md5-cache update (repo name unavailable)")
         if args.pr:
             from overlay_tools.core.gh_utils import (
                 gh_find_open_update_pr_for_package,
@@ -322,11 +343,16 @@ def main(argv: list[str] | None = None) -> int:
 
     deleted_oldest: Path | None = None
     dropped_version: str | None = None
+    deleted_oldest_cache: Path | None = None
     if not args.keep_old and oldest != latest:
         log.info(f"Removing {oldest.path.name}")
         oldest.path.unlink()
         deleted_oldest = oldest.path
         dropped_version = oldest.pv
+        deleted_oldest_cache = metadata_cache_path(repo_root, category, name, oldest.pv)
+        if deleted_oldest_cache.exists():
+            log.info(f"Removing {deleted_oldest_cache.relative_to(repo_root)}")
+            deleted_oldest_cache.unlink()
 
     if args.skip_manifest:
         log.info("Skipping Manifest update (--skip-manifest)")
@@ -338,6 +364,25 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as e:
             log.warning(f"Manifest update failed: {e}")
             log.info(f"Run manually: ebuild {new_path} manifest")
+
+    new_cache_path = metadata_cache_path(repo_root, category, name, normalized_version)
+    repo_name = read_repo_name(repo_root)
+    if repo_name:
+        log.info("Updating metadata/md5-cache...")
+        try:
+            run_egencache_update(repo_root, repo_name=repo_name, atom=f"{category}/{name}")
+            if new_cache_path.exists():
+                log.success("metadata/md5-cache updated")
+            else:
+                log.warning(
+                    f"egencache completed but did not create {new_cache_path.relative_to(repo_root)}"
+                )
+        except Exception as e:
+            log.warning(f"metadata/md5-cache update failed: {e}")
+            log.info(f"Run manually: egencache --repo {repo_name} --update {category}/{name}")
+    else:
+        log.warning("Could not determine repo name from profiles/repo_name")
+        log.info("Skipping metadata/md5-cache update")
 
     if args.skip_git or not is_git:
         log.rule()
@@ -356,8 +401,12 @@ def main(argv: list[str] | None = None) -> int:
     log.rule("Git")
 
     paths_to_add = [new_path, pkg_path / "Manifest"]
+    if new_cache_path.exists():
+        paths_to_add.append(new_cache_path)
     if deleted_oldest:
         paths_to_add.append(deleted_oldest)
+    if deleted_oldest_cache and not deleted_oldest_cache.exists():
+        paths_to_add.append(deleted_oldest_cache)
 
     should_commit = args.yes or args.pr
 

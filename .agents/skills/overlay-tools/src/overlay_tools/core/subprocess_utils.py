@@ -48,3 +48,13 @@ def run_ebuild_manifest(ebuild_path: Path) -> subprocess.CompletedProcess[str]:
     if priv_cmd:
         cmd = [priv_cmd] + cmd
     return run(cmd, cwd=ebuild_path.parent, check=True)
+
+
+def run_egencache_update(
+    repo_root: Path,
+    *,
+    repo_name: str,
+    atom: str,
+) -> subprocess.CompletedProcess[str]:
+    cmd = ["egencache", "--repo", repo_name, "--update", atom]
+    return run(cmd, cwd=repo_root, check=True)
