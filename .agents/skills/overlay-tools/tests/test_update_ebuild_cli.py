@@ -1,6 +1,13 @@
+import argparse
 from pathlib import Path
 
-from overlay_tools.cli.update_ebuild import UpdateContext, build_update_plan
+from overlay_tools.cli.update_ebuild import (
+    AppliedChanges,
+    UpdateContext,
+    build_update_plan,
+    collect_paths_to_stage,
+    should_commit,
+)
 from overlay_tools.core.ebuilds import EbuildName
 from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuild_to_drop
 
@@ -107,3 +114,98 @@ class TestBuildUpdatePlan:
 
         assert plan.drop_ebuild is None
         assert plan.commit_message == "media-video/hayase-bin: add 6.4.57"
+
+
+def make_context(tmp_path: Path) -> UpdateContext:
+    pkg_path = tmp_path / "dev-util" / "t3code-bin"
+    pkg_path.mkdir(parents=True)
+
+    return UpdateContext(
+        category="dev-util",
+        name="t3code-bin",
+        pkg_path=pkg_path,
+        repo_root=tmp_path,
+        is_git=True,
+        latest=EbuildName("t3code-bin", "0.0.9", pkg_path / "t3code-bin-0.0.9.ebuild"),
+        ebuilds=[
+            EbuildName("t3code-bin", "0.0.4", pkg_path / "t3code-bin-0.0.4.ebuild"),
+            EbuildName("t3code-bin", "0.0.7", pkg_path / "t3code-bin-0.0.7.ebuild"),
+            EbuildName("t3code-bin", "0.0.8", pkg_path / "t3code-bin-0.0.8.ebuild"),
+            EbuildName("t3code-bin", "0.0.9", pkg_path / "t3code-bin-0.0.9.ebuild"),
+        ],
+        base_branch="master",
+        feature_branch="update/dev-util-t3code-bin",
+        original_branch="master",
+    )
+
+
+class TestCommitFlowHelpers:
+    def test_collect_paths_to_stage_skips_missing_deleted_cache(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        manifest_path = context.pkg_path / "Manifest"
+        manifest_path.write_text("", encoding="utf-8")
+        plan.new_path.write_text("", encoding="utf-8")
+
+        paths = collect_paths_to_stage(
+            plan,
+            AppliedChanges(
+                deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
+                deleted_cache_path=None,
+            ),
+        )
+
+        assert paths == [
+            plan.new_path,
+            manifest_path,
+            plan.drop_ebuild.path,
+        ]
+        assert plan.drop_cache_path not in paths
+
+    def test_collect_paths_to_stage_includes_deleted_cache_when_removed(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        manifest_path = context.pkg_path / "Manifest"
+        manifest_path.write_text("", encoding="utf-8")
+        plan.new_path.write_text("", encoding="utf-8")
+        plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.new_cache_path.write_text("", encoding="utf-8")
+
+        paths = collect_paths_to_stage(
+            plan,
+            AppliedChanges(
+                deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
+                deleted_cache_path=plan.drop_cache_path,
+            ),
+        )
+
+        assert paths == [
+            plan.new_path,
+            manifest_path,
+            plan.new_cache_path,
+            plan.drop_ebuild.path,
+            plan.drop_cache_path,
+        ]
+
+    def test_should_commit_returns_true_for_yes_flag(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+        assert should_commit(
+            log=None,
+            args=argparse.Namespace(yes=True, pr=False),
+        )
+
+    def test_should_commit_skips_noninteractive_without_yes(self, monkeypatch):
+        messages: list[str] = []
+
+        class Log:
+            def info(self, message: str) -> None:
+                messages.append(message)
+
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+        assert not should_commit(
+            log=Log(),
+            args=argparse.Namespace(yes=False, pr=False),
+        )
+        assert messages == ["Non-interactive mode detected, skipping commit (use -y to commit)"]

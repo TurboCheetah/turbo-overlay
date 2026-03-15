@@ -52,6 +52,12 @@ class UpdatePlan:
     commit_message: str
 
 
+@dataclass(frozen=True)
+class AppliedChanges:
+    deleted_ebuild_path: Path | None
+    deleted_cache_path: Path | None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="update-ebuild",
@@ -329,7 +335,7 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
     return feature_branch, existing_pr_ref
 
 
-def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> Path | None:
+def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> AppliedChanges:
     log.step("copy", f"{plan.context.latest.path.name} → {plan.new_filename}")
     shutil.copy2(plan.context.latest.path, plan.new_path)
 
@@ -340,6 +346,7 @@ def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan)
             log.warning("MY_PV not found in ebuild - variable not updated")
 
     deleted_oldest = None
+    deleted_cache_path = None
     if plan.drop_ebuild:
         log.step("drop", plan.drop_ebuild.path.name)
         plan.drop_ebuild.path.unlink()
@@ -347,8 +354,12 @@ def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan)
         if plan.drop_cache_path and plan.drop_cache_path.exists():
             log.step("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root)))
             plan.drop_cache_path.unlink()
+            deleted_cache_path = plan.drop_cache_path
 
-    return deleted_oldest
+    return AppliedChanges(
+        deleted_ebuild_path=deleted_oldest,
+        deleted_cache_path=deleted_cache_path,
+    )
 
 
 def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> None:
@@ -387,38 +398,41 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
         log.info("Skipping metadata/md5-cache update")
 
 
-def maybe_commit(log: Logger, args: argparse.Namespace, plan: UpdatePlan, deleted_oldest: Path | None) -> bool:
+def collect_paths_to_stage(plan: UpdatePlan, applied_changes: AppliedChanges) -> list[Path]:
     paths_to_add = [plan.new_path, plan.context.pkg_path / "Manifest"]
     if plan.new_cache_path.exists():
         paths_to_add.append(plan.new_cache_path)
-    if deleted_oldest:
-        paths_to_add.append(deleted_oldest)
-    if plan.drop_cache_path and not plan.drop_cache_path.exists():
-        paths_to_add.append(plan.drop_cache_path)
+    if applied_changes.deleted_ebuild_path:
+        paths_to_add.append(applied_changes.deleted_ebuild_path)
+    if applied_changes.deleted_cache_path:
+        paths_to_add.append(applied_changes.deleted_cache_path)
+    return paths_to_add
 
-    should_commit = args.yes or args.pr
-    if not should_commit:
-        if not sys.stdin.isatty():
-            log.info("Non-interactive mode detected, skipping commit (use -y to commit)")
-            return False
-        try:
-            from rich.prompt import Confirm
 
-            should_commit = Confirm.ask("Commit these changes?", default=False)
-        except (ImportError, EOFError):
-            try:
-                response = input("Commit these changes? [y/N] ").strip().lower()
-                should_commit = response == "y"
-            except EOFError:
-                return False
+def should_commit(log: Logger, args: argparse.Namespace) -> bool:
+    if args.yes or args.pr:
+        return True
 
-    if not should_commit:
+    if not sys.stdin.isatty():
+        log.info("Non-interactive mode detected, skipping commit (use -y to commit)")
         return False
 
+    try:
+        from rich.prompt import Confirm
+
+        return Confirm.ask("Commit these changes?", default=False)
+    except (ImportError, EOFError):
+        try:
+            response = input("Commit these changes? [y/N] ").strip().lower()
+            return response == "y"
+        except EOFError:
+            return False
+
+
+def commit_changes(log: Logger, plan: UpdatePlan, paths_to_add: list[Path]) -> None:
     git_add(paths_to_add, plan.context.repo_root)
     git_commit(plan.commit_message, plan.context.repo_root)
     log.success(f"Committed: {plan.commit_message}")
-    return True
 
 
 def create_or_update_pr(
@@ -526,7 +540,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.pr and plan.context.is_git:
             feature_branch, existing_pr_ref = prepare_pr_branch(log, plan)
 
-        deleted_oldest = apply_ebuild_update(log, args, plan)
+        applied_changes = apply_ebuild_update(log, args, plan)
         update_manifest_and_cache(log, args, plan)
 
         if args.skip_git or not plan.context.is_git:
@@ -540,9 +554,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         log.rule("Git")
-        if not maybe_commit(log, args, plan, deleted_oldest):
+        if not should_commit(log, args):
             log.info("Changes not committed")
             return 0
+        paths_to_add = collect_paths_to_stage(plan, applied_changes)
+        commit_changes(log, plan, paths_to_add)
 
         if not args.pr:
             log.rule()

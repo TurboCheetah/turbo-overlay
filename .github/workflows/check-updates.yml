@@ -97,6 +97,50 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Configure Portage repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p /etc/portage/repos.conf
+          cat > /etc/portage/repos.conf/zzz-turbo-overlay.conf <<EOF
+          [DEFAULT]
+          main-repo = gentoo
+
+          [gentoo]
+          location = /var/db/repos/gentoo
+
+          [turbo-overlay]
+          location = ${GITHUB_WORKSPACE}
+          masters = gentoo
+          auto-sync = no
+          EOF
+
+          cat /etc/portage/repos.conf/zzz-turbo-overlay.conf
+
+      - name: Validate Portage repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d /var/db/repos/gentoo || {
+            echo "ERROR: /var/db/repos/gentoo was not created by emerge-webrsync"
+            exit 1
+          }
+
+          GENTOO_PATH="$(portageq get_repo_path / gentoo)"
+          OVERLAY_PATH="$(portageq get_repo_path / turbo-overlay)"
+
+          test "${GENTOO_PATH}" = "/var/db/repos/gentoo" || {
+            echo "ERROR: gentoo repo path mismatch: ${GENTOO_PATH}"
+            exit 1
+          }
+
+          test "${OVERLAY_PATH}" = "${GITHUB_WORKSPACE}" || {
+            echo "ERROR: turbo-overlay repo path mismatch: ${OVERLAY_PATH}"
+            exit 1
+          }
+
       - name: Trust workspace for git
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
