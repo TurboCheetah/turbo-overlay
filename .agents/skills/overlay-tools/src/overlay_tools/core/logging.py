@@ -190,11 +190,12 @@ class Logger:
     def _print(self, level: str, message: str, **kwargs: Any) -> None:
         if self.quiet:
             return
+        style = level if level in THEME_DICT else "info"
         if self.console:
-            icon = RICH_ICONS[level]
-            self.console.print(f"[{level}]{icon}[/{level}]  {message}", **kwargs)
+            icon = RICH_ICONS.get(level, RICH_ICONS["info"])
+            self.console.print(f"[{style}]{icon}[/{style}]  {message}", **kwargs)
         else:
-            print(f"{PLAIN_ICONS[level]} {message}", file=sys.stderr)
+            print(f"{PLAIN_ICONS.get(level, PLAIN_ICONS['info'])} {message}", file=sys.stderr)
 
     @contextmanager
     def progress(self, description: str, total: int) -> Generator[ProgressContext, None, None]:

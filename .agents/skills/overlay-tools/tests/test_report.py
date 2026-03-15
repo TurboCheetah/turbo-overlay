@@ -1,3 +1,5 @@
+import pytest
+
 from overlay_tools.core.report import (
     PackageStatus,
     StatusSummary,
@@ -65,8 +67,28 @@ class TestSummarizePackages:
     def test_counts_status_groups(self):
         summary = summarize_packages(_sample_packages())
 
-        assert summary == StatusSummary(updates=1, up_to_date=1, manual=1, errors=1)
+        assert summary == StatusSummary(updates=1, up_to_date=1, manual=1, unknown=0, errors=1)
         assert summary.checked == 2
+
+
+    def test_counts_unknown_statuses_separately(self):
+        summary = summarize_packages(
+            _sample_packages()
+            + [
+                PackageStatus(
+                    category="net-im",
+                    name="mystery",
+                    current_version="0.0.1",
+                    latest_version=None,
+                    github_repo=None,
+                    custom_url=None,
+                    status="unknown",
+                )
+            ]
+        )
+
+        assert summary.unknown == 1
+        assert summary.errors == 1
 
 
 class TestRenderTerminalReport:
@@ -80,7 +102,29 @@ class TestRenderTerminalReport:
         assert "1 updates available" in output
         assert "1 need manual check" in output
 
+    def test_plain_fallback_reports_unknown_statuses(self, monkeypatch, capsys):
+        monkeypatch.setattr("overlay_tools.core.report._render_rich", lambda packages: (_ for _ in ()).throw(ImportError))
+
+        render_terminal_report(
+            _sample_packages()
+            + [
+                PackageStatus(
+                    category="net-im",
+                    name="mystery",
+                    current_version="0.0.1",
+                    latest_version=None,
+                    github_repo=None,
+                    custom_url=None,
+                    status="unknown",
+                )
+            ]
+        )
+        output = capsys.readouterr().out
+
+        assert "1 unknown status" in output
+
     def test_rich_render_contains_key_content(self, capsys):
+        pytest.importorskip("rich")
         render_terminal_report(_sample_packages())
         output = capsys.readouterr().out
 

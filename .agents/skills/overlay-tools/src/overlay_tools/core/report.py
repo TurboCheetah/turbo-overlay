@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
+
+from overlay_tools.core.logging import GENTOO_ICON
+
+if TYPE_CHECKING:
+    from rich.text import Text
 
 
 STATUS_ORDER = {
@@ -11,7 +17,6 @@ STATUS_ORDER = {
     "unknown": 3,
     "up-to-date": 4,
 }
-GENTOO_ICON = ""
 
 
 @dataclass
@@ -37,6 +42,7 @@ class StatusSummary:
     updates: int = 0
     up_to_date: int = 0
     manual: int = 0
+    unknown: int = 0
     errors: int = 0
 
     @property
@@ -80,7 +86,7 @@ def sort_packages(packages: list[PackageStatus]) -> list[PackageStatus]:
 
 
 def summarize_packages(packages: list[PackageStatus]) -> StatusSummary:
-    counts = {"updates": 0, "up_to_date": 0, "manual": 0, "errors": 0}
+    counts = {"updates": 0, "up_to_date": 0, "manual": 0, "unknown": 0, "errors": 0}
 
     for package in packages:
         if package.status == "update-available":
@@ -89,6 +95,8 @@ def summarize_packages(packages: list[PackageStatus]) -> StatusSummary:
             counts["up_to_date"] += 1
         elif package.status == "manual-check":
             counts["manual"] += 1
+        elif package.status == "unknown":
+            counts["unknown"] += 1
         else:
             counts["errors"] += 1
 
@@ -182,6 +190,9 @@ def _render_rich(packages: list[PackageStatus]) -> None:
             Text("need manual check", style="dim yellow"),
         )
 
+    if summary.unknown > 0:
+        stats.add_row(Text(str(summary.unknown), style="yellow"), Text("unknown status", style="dim yellow"))
+
     if summary.errors > 0:
         stats.add_row(Text(str(summary.errors), style="red"), Text("errors", style="dim red"))
 
@@ -242,12 +253,14 @@ def _render_plain(packages: list[PackageStatus]) -> None:
         print(f"{summary.updates} updates available")
     if summary.manual:
         print(f"{summary.manual} need manual check")
+    if summary.unknown:
+        print(f"{summary.unknown} unknown status")
     if summary.errors:
         print(f"{summary.errors} errors")
     print()
 
 
-def _format_row(package: PackageStatus) -> tuple["Text", "Text", "Text"]:
+def _format_row(package: PackageStatus) -> tuple[Text, Text, Text]:
     from rich.text import Text
 
     if package.status == "update-available":

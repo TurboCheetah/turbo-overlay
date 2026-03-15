@@ -371,8 +371,7 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
             run_ebuild_manifest(plan.new_path)
             log.success("Manifest updated")
         except Exception as exc:
-            log.warning(f"Manifest update failed: {exc}")
-            log.info(f"Run manually: ebuild {plan.new_path} manifest")
+            raise RuntimeError(f"Manifest update failed for {plan.new_path.name}: {exc}") from exc
 
     if plan.repo_name:
         log.step("cache", f"update {plan.context.category}/{plan.context.name}")
@@ -386,16 +385,16 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
                 log.success("metadata/md5-cache updated")
             else:
                 rel_path = plan.new_cache_path.relative_to(plan.context.repo_root)
-                log.warning(f"egencache completed but did not create {rel_path}")
+                raise RuntimeError(f"egencache did not create {rel_path}")
         except Exception as exc:
-            log.warning(f"metadata/md5-cache update failed: {exc}")
-            log.info(
-                f"Run manually: egencache --repo {plan.repo_name} --update "
-                f"{plan.context.category}/{plan.context.name}"
-            )
+            if isinstance(exc, RuntimeError):
+                raise
+            raise RuntimeError(
+                "metadata/md5-cache update failed for "
+                f"{plan.context.category}/{plan.context.name}: {exc}"
+            ) from exc
     else:
-        log.warning("Could not determine repo name from profiles/repo_name")
-        log.info("Skipping metadata/md5-cache update")
+        raise RuntimeError("Could not determine repo name from profiles/repo_name")
 
 
 def collect_paths_to_stage(plan: UpdatePlan, applied_changes: AppliedChanges) -> list[Path]:
@@ -583,8 +582,13 @@ def main(argv: list[str] | None = None) -> int:
             and plan.context.original_branch
             and plan.context.original_branch != feature_branch
         ):
-            log.step("branch", f"return to {plan.context.original_branch}")
-            git_checkout_branch(plan.context.original_branch, plan.context.repo_root)
+            try:
+                log.step("branch", f"return to {plan.context.original_branch}")
+                git_checkout_branch(plan.context.original_branch, plan.context.repo_root)
+            except Exception as exc:
+                log.error(
+                    f"Failed to return to branch {plan.context.original_branch}: {exc}"
+                )
 
 
 if __name__ == "__main__":
