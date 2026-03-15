@@ -394,6 +394,10 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
                 f"{plan.context.category}/{plan.context.name}: {exc}"
             ) from exc
     else:
+        if args.skip_git or not plan.context.is_git:
+            log.warning("Could not determine repo name from profiles/repo_name")
+            log.info("Skipping metadata/md5-cache update")
+            return
         raise RuntimeError("Could not determine repo name from profiles/repo_name")
 
 

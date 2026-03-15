@@ -193,8 +193,12 @@ class TestCommitFlowHelpers:
     def test_should_commit_returns_true_for_yes_flag(self, monkeypatch):
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
+        class StubLog:
+            def info(self, message: str) -> None:
+                pass
+
         assert should_commit(
-            log=None,
+            log=StubLog(),
             args=argparse.Namespace(yes=True, pr=False),
         )
 
