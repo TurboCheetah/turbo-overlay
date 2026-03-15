@@ -1,11 +1,14 @@
 import argparse
 from pathlib import Path
 
+import pytest
+
 from overlay_tools.cli.update_ebuild import (
     AppliedChanges,
     UpdateContext,
     build_update_plan,
     collect_paths_to_stage,
+    main,
     should_commit,
 )
 from overlay_tools.core.ebuilds import EbuildName
@@ -209,3 +212,25 @@ class TestCommitFlowHelpers:
             args=argparse.Namespace(yes=False, pr=False),
         )
         assert messages == ["Non-interactive mode detected, skipping commit (use -y to commit)"]
+
+
+class TestPrGuardrails:
+    def test_pr_rejects_skip_git(self):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["--pr", "--skip-git", "--version", "1.0.0", "media-video/hayase-bin"])
+
+        assert excinfo.value.code == 2
+
+    def test_pr_requires_git_repository(self, monkeypatch, tmp_path: Path):
+        pkg_path = tmp_path / "media-video" / "hayase-bin"
+        pkg_path.mkdir(parents=True)
+        (pkg_path / "hayase-bin-1.0.0.ebuild").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.is_git_repo",
+            lambda path: False,
+        )
+
+        result = main(["--pr", "--version", "1.0.1", str(pkg_path)])
+
+        assert result == 1

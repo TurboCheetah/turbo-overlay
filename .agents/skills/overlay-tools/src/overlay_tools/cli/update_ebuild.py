@@ -505,7 +505,10 @@ def create_or_update_pr(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.pr and args.skip_git:
+        parser.error("--pr cannot be used with --skip-git")
     if args.pr:
         args.yes = True
 
@@ -524,6 +527,9 @@ def main(argv: list[str] | None = None) -> int:
         context = build_context(args, normalized_version)
     except (ValueError, ExternalToolMissingError) as exc:
         log.error(str(exc))
+        return 1
+    if args.pr and not context.is_git:
+        log.error("--pr requires running inside a git repository")
         return 1
 
     plan = build_update_plan(context, normalized_version, keep_old=args.keep_old)
