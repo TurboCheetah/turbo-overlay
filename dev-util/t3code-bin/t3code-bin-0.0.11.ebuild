@@ -4,6 +4,7 @@
 EAPI=8
 
 APPIMAGE_NAME="T3-Code-${PV}-x86_64.AppImage"
+T3CODE_COMMIT="876bbd715ae6aa8e1d663455747e17c92e0a287c"
 
 inherit desktop xdg
 
@@ -11,9 +12,9 @@ DESCRIPTION="Desktop app for working with code and AI coding agents"
 HOMEPAGE="https://t3.codes https://github.com/pingdotgg/t3code"
 SRC_URI="
 	https://github.com/pingdotgg/t3code/releases/download/v${PV}/${APPIMAGE_NAME}
-	https://raw.githubusercontent.com/maria-rcks/t3code-aur/main/t3code-icon.png
+	https://raw.githubusercontent.com/pingdotgg/t3code/${T3CODE_COMMIT}/apps/desktop/resources/icon.png
 		-> ${P}-icon.png
-	https://raw.githubusercontent.com/maria-rcks/t3code-aur/main/LICENSE
+	https://raw.githubusercontent.com/pingdotgg/t3code/${T3CODE_COMMIT}/LICENSE
 		-> ${P}-LICENSE
 "
 S="${WORKDIR}/squashfs-root"
