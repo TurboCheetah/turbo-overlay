@@ -33,8 +33,8 @@ src_install() {
 	dobin usr/bin/yaak-app
 	dosym yaak-app /usr/bin/yaak
 
-	insinto /usr/lib/yaak
-	doins -r usr/lib/yaak/*
+	# Preserve executable bits on bundled helper binaries.
+	cp -a usr/lib/yaak "${ED}"/usr/lib/ || die
 
 	domenu usr/share/applications/yaak.desktop || die
 	insinto /usr/share/icons/hicolor
