@@ -5,6 +5,7 @@ import pytest
 
 from overlay_tools.cli.update_ebuild import (
     AppliedChanges,
+    RefreshedArtifacts,
     UpdateContext,
     build_update_plan,
     collect_paths_to_stage,
@@ -156,6 +157,7 @@ class TestCommitFlowHelpers:
                 deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
                 deleted_cache_path=None,
             ),
+            RefreshedArtifacts(paths=(manifest_path,)),
         )
 
         assert paths == [
@@ -180,6 +182,7 @@ class TestCommitFlowHelpers:
                 deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
                 deleted_cache_path=plan.drop_cache_path,
             ),
+            RefreshedArtifacts(paths=(manifest_path, plan.new_cache_path)),
         )
 
         assert paths == [
@@ -189,6 +192,31 @@ class TestCommitFlowHelpers:
             plan.drop_ebuild.path,
             plan.drop_cache_path,
         ]
+
+    def test_collect_paths_to_stage_skips_stale_manifest_and_cache(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        manifest_path = context.pkg_path / "Manifest"
+        manifest_path.write_text("stale", encoding="utf-8")
+        plan.new_path.write_text("", encoding="utf-8")
+        plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.new_cache_path.write_text("stale", encoding="utf-8")
+
+        paths = collect_paths_to_stage(
+            plan,
+            AppliedChanges(
+                deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
+                deleted_cache_path=None,
+            ),
+            RefreshedArtifacts(paths=()),
+        )
+
+        assert paths == [
+            plan.new_path,
+            plan.drop_ebuild.path,
+        ]
+        assert manifest_path not in paths
+        assert plan.new_cache_path not in paths
 
     def test_should_commit_returns_true_for_yes_flag(self, monkeypatch):
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -236,5 +264,33 @@ class TestPrGuardrails:
         )
 
         result = main(["--pr", "--version", "1.0.1", str(pkg_path)])
+
+        assert result == 1
+
+    def test_pr_rejects_branch_matching_base(self, monkeypatch, tmp_path: Path):
+        pkg_path = tmp_path / "cat" / "pkg"
+        pkg_path.mkdir(parents=True)
+        (pkg_path / "pkg-1.0.0.ebuild").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.is_git_repo",
+            lambda path: True,
+        )
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "work")
+
+        result = main(
+            [
+                "--pr",
+                "--base",
+                "main",
+                "--branch",
+                "main",
+                "--version",
+                "1.0.1",
+                str(pkg_path),
+            ]
+        )
 
         assert result == 1

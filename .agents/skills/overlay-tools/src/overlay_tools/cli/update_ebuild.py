@@ -58,6 +58,11 @@ class AppliedChanges:
     deleted_cache_path: Path | None
 
 
+@dataclass(frozen=True)
+class RefreshedArtifacts:
+    paths: tuple[Path, ...]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="update-ebuild",
@@ -362,7 +367,9 @@ def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan)
     )
 
 
-def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> None:
+def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> RefreshedArtifacts:
+    refreshed_paths: list[Path] = []
+
     if args.skip_manifest:
         log.step("manifest", "skip (--skip-manifest)")
     else:
@@ -370,6 +377,7 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
         try:
             run_ebuild_manifest(plan.new_path)
             log.success("Manifest updated")
+            refreshed_paths.append(plan.context.pkg_path / "Manifest")
         except Exception as exc:
             raise RuntimeError(f"Manifest update failed for {plan.new_path.name}: {exc}") from exc
 
@@ -383,6 +391,7 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
             )
             if plan.new_cache_path.exists():
                 log.success("metadata/md5-cache updated")
+                refreshed_paths.append(plan.new_cache_path)
             else:
                 rel_path = plan.new_cache_path.relative_to(plan.context.repo_root)
                 raise RuntimeError(f"egencache did not create {rel_path}")
@@ -397,14 +406,18 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
         if args.skip_git or not plan.context.is_git:
             log.warning("Could not determine repo name from profiles/repo_name")
             log.info("Skipping metadata/md5-cache update")
-            return
+            return RefreshedArtifacts(paths=tuple(refreshed_paths))
         raise RuntimeError("Could not determine repo name from profiles/repo_name")
 
+    return RefreshedArtifacts(paths=tuple(refreshed_paths))
 
-def collect_paths_to_stage(plan: UpdatePlan, applied_changes: AppliedChanges) -> list[Path]:
-    paths_to_add = [plan.new_path, plan.context.pkg_path / "Manifest"]
-    if plan.new_cache_path.exists():
-        paths_to_add.append(plan.new_cache_path)
+
+def collect_paths_to_stage(
+    plan: UpdatePlan,
+    applied_changes: AppliedChanges,
+    refreshed_artifacts: RefreshedArtifacts,
+) -> list[Path]:
+    paths_to_add = [plan.new_path, *refreshed_artifacts.paths]
     if applied_changes.deleted_ebuild_path:
         paths_to_add.append(applied_changes.deleted_ebuild_path)
     if applied_changes.deleted_cache_path:
@@ -535,6 +548,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.pr and not context.is_git:
         log.error("--pr requires running inside a git repository")
         return 1
+    if args.pr and context.feature_branch == context.base_branch:
+        log.error("--branch must differ from the PR base branch")
+        return 1
 
     plan = build_update_plan(context, normalized_version, keep_old=args.keep_old)
     render_header(log, args, plan)
@@ -550,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
             feature_branch, existing_pr_ref = prepare_pr_branch(log, plan)
 
         applied_changes = apply_ebuild_update(log, args, plan)
-        update_manifest_and_cache(log, args, plan)
+        refreshed_artifacts = update_manifest_and_cache(log, args, plan)
 
         if args.skip_git or not plan.context.is_git:
             log.rule()
@@ -566,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:
         if not should_commit(log, args):
             log.info("Changes not committed")
             return 0
-        paths_to_add = collect_paths_to_stage(plan, applied_changes)
+        paths_to_add = collect_paths_to_stage(plan, applied_changes, refreshed_artifacts)
         commit_changes(log, plan, paths_to_add)
 
         if not args.pr:
