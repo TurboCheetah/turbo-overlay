@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import CalledProcessError
 
 from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, select_latest_ebuild, update_ebuild_var
 from overlay_tools.core.errors import ExternalToolMissingError, VersionError
@@ -237,6 +239,40 @@ def build_update_plan(
     )
 
 
+def is_permission_related_error(exc: BaseException) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+
+    if isinstance(exc, OSError):
+        if exc.errno in {errno.EACCES, errno.EPERM}:
+            return True
+        return "permission denied" in str(exc).lower()
+
+    if isinstance(exc, CalledProcessError):
+        details = " ".join(
+            part
+            for part in (
+                str(exc),
+                exc.output if isinstance(exc.output, str) else None,
+                exc.stderr if isinstance(exc.stderr, str) else None,
+            )
+            if part
+        ).lower()
+        return any(token in details for token in ("permission denied", "eacces", "eperm"))
+
+    return False
+
+
+def format_egencache_error_details(exc: BaseException) -> str:
+    parts = [str(exc)]
+    if isinstance(exc, CalledProcessError):
+        if exc.output:
+            parts.append(str(exc.output))
+        if exc.stderr and exc.stderr != exc.output:
+            parts.append(str(exc.stderr))
+    return " | ".join(part for part in parts if part)
+
+
 def render_header(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> None:
     log.banner("overlay-tools", "Update ebuild and optional PR workflow")
     log.rule("Update Ebuild")
@@ -392,19 +428,26 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
                 repo_name=plan.repo_name,
                 atom=f"{plan.context.category}/{plan.context.name}",
             )
+        except (CalledProcessError, OSError) as exc:
+            if not is_permission_related_error(exc):
+                raise RuntimeError(
+                    "metadata/md5-cache update failed for "
+                    f"{plan.context.category}/{plan.context.name}: "
+                    f"{format_egencache_error_details(exc)}"
+                ) from exc
+
+            log.warning(
+                "metadata/md5-cache update skipped for "
+                f"{plan.context.category}/{plan.context.name}: "
+                f"{format_egencache_error_details(exc)}"
+            )
+        else:
             if plan.new_cache_path.exists():
                 log.success("metadata/md5-cache updated")
                 refreshed_paths.append(plan.new_cache_path)
             else:
                 rel_path = plan.new_cache_path.relative_to(plan.context.repo_root)
                 raise RuntimeError(f"egencache did not create {rel_path}")
-        except Exception as exc:
-            if isinstance(exc, RuntimeError):
-                raise
-            raise RuntimeError(
-                "metadata/md5-cache update failed for "
-                f"{plan.context.category}/{plan.context.name}: {exc}"
-            ) from exc
     else:
         if args.skip_git or not plan.context.is_git:
             log.warning("Could not determine repo name from profiles/repo_name")

@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from subprocess import CalledProcessError
 
 import pytest
 
@@ -271,6 +272,105 @@ class TestCommitFlowHelpers:
         plan.new_cache_path.write_text("", encoding="utf-8")
 
         with pytest.raises(RuntimeError, match=r"Manifest update failed .*did not create Manifest"):
+            update_manifest_and_cache(
+                Log(),
+                argparse.Namespace(skip_manifest=False, skip_git=False),
+                plan,
+            )
+
+    def test_update_manifest_and_cache_skips_unwritable_cache(self, monkeypatch, tmp_path: Path):
+        (tmp_path / "profiles").mkdir()
+        (tmp_path / "profiles" / "repo_name").write_text("turbo-overlay\n", encoding="utf-8")
+
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        plan.new_path.write_text("", encoding="utf-8")
+
+        warnings: list[str] = []
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                pass
+
+            def success(self, message: str) -> None:
+                pass
+
+            def warning(self, message: str) -> None:
+                warnings.append(message)
+
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_ebuild_manifest",
+            lambda path: (path.parent / "Manifest").write_text("", encoding="utf-8"),
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_egencache_update",
+            lambda repo_root, repo_name, atom: (_ for _ in ()).throw(
+                CalledProcessError(
+                    returncode=1,
+                    cmd=["egencache", "--repo", repo_name, "--update", atom],
+                    output="Permission denied",
+                    stderr="Permission denied",
+                )
+            ),
+        )
+
+        refreshed = update_manifest_and_cache(
+            Log(),
+            argparse.Namespace(skip_manifest=False, skip_git=False),
+            plan,
+        )
+
+        assert refreshed.paths == (context.pkg_path / "Manifest",)
+        assert warnings == [
+            (
+                "metadata/md5-cache update skipped for "
+                f"{context.category}/{context.name}: "
+                "Command '['egencache', '--repo', 'turbo-overlay', "
+                f"'--update', '{context.category}/{context.name}']' returned non-zero "
+                "exit status 1. | Permission denied"
+            )
+        ]
+
+    def test_update_manifest_and_cache_surfaces_non_permission_cache_failure(
+        self, monkeypatch, tmp_path: Path
+    ):
+        (tmp_path / "profiles").mkdir()
+        (tmp_path / "profiles" / "repo_name").write_text("turbo-overlay\n", encoding="utf-8")
+
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        plan.new_path.write_text("", encoding="utf-8")
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                pass
+
+            def success(self, message: str) -> None:
+                pass
+
+            def warning(self, message: str) -> None:
+                pass
+
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_ebuild_manifest",
+            lambda path: (path.parent / "Manifest").write_text("", encoding="utf-8"),
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_egencache_update",
+            lambda repo_root, repo_name, atom: (_ for _ in ()).throw(
+                CalledProcessError(
+                    returncode=1,
+                    cmd=["egencache", "--repo", repo_name, "--update", atom],
+                    output="unexpected parse failure",
+                    stderr="unexpected parse failure",
+                )
+            ),
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"metadata/md5-cache update failed for .*unexpected parse failure",
+        ):
             update_manifest_and_cache(
                 Log(),
                 argparse.Namespace(skip_manifest=False, skip_git=False),
