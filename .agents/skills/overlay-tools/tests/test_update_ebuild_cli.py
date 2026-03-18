@@ -11,6 +11,7 @@ from overlay_tools.cli.update_ebuild import (
     collect_paths_to_stage,
     main,
     should_commit,
+    update_manifest_and_cache,
 )
 from overlay_tools.core.ebuilds import EbuildName
 from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuild_to_drop
@@ -245,6 +246,36 @@ class TestCommitFlowHelpers:
         )
         assert messages == ["Non-interactive mode detected, skipping commit (use -y to commit)"]
 
+    def test_update_manifest_and_cache_requires_manifest_output(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        plan.new_path.write_text("", encoding="utf-8")
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                pass
+
+            def success(self, message: str) -> None:
+                pass
+
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_ebuild_manifest",
+            lambda path: None,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_egencache_update",
+            lambda repo_root, repo_name, atom: plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True),
+        )
+        plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.new_cache_path.write_text("", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match=r"Manifest update failed .*did not create Manifest"):
+            update_manifest_and_cache(
+                Log(),
+                argparse.Namespace(skip_manifest=False, skip_git=False),
+                plan,
+            )
+
 
 class TestPrGuardrails:
     def test_pr_rejects_skip_git(self):
@@ -294,3 +325,54 @@ class TestPrGuardrails:
         )
 
         assert result == 1
+
+    def test_runtime_errors_return_one(self, monkeypatch, tmp_path: Path):
+        pkg_path = tmp_path / "cat" / "pkg"
+        pkg_path.mkdir(parents=True)
+        (pkg_path / "pkg-1.0.0.ebuild").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.apply_ebuild_update",
+            lambda log, args, plan: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        result = main(["--version", "1.0.1", str(pkg_path)])
+
+        assert result == 1
+
+    def test_non_pr_flow_does_not_restore_branch(self, monkeypatch, tmp_path: Path):
+        pkg_path = tmp_path / "cat" / "pkg"
+        pkg_path.mkdir(parents=True)
+        (pkg_path / "pkg-1.0.0.ebuild").write_text("", encoding="utf-8")
+        (tmp_path / "profiles").mkdir()
+        (tmp_path / "profiles" / "repo_name").write_text("test-overlay\n", encoding="utf-8")
+
+        checkout_calls: list[str] = []
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.run_ebuild_manifest", lambda path: (path.parent / "Manifest").write_text("", encoding="utf-8"))
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_egencache_update",
+            lambda repo_root, repo_name, atom: (
+                (repo_root / "metadata" / "md5-cache" / "cat").mkdir(parents=True, exist_ok=True),
+                (repo_root / "metadata" / "md5-cache" / "cat" / "pkg-1.0.1").write_text("", encoding="utf-8"),
+            ),
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_checkout_branch",
+            lambda branch, repo_root, create=False, start_point=None, track_remote=False: checkout_calls.append(branch),
+        )
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_commit", lambda message, repo_root: None)
+
+        result = main(["-y", "--version", "1.0.1", str(pkg_path)])
+
+        assert result == 0
+        assert checkout_calls == []

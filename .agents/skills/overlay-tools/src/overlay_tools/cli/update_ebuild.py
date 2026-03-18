@@ -376,8 +376,11 @@ def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: Updat
         log.step("manifest", "update")
         try:
             run_ebuild_manifest(plan.new_path)
+            manifest_path = plan.context.pkg_path / "Manifest"
+            if not manifest_path.exists():
+                raise RuntimeError(f"ebuild manifest did not create {manifest_path.name}")
             log.success("Manifest updated")
-            refreshed_paths.append(plan.context.pkg_path / "Manifest")
+            refreshed_paths.append(manifest_path)
         except Exception as exc:
             raise RuntimeError(f"Manifest update failed for {plan.new_path.name}: {exc}") from exc
 
@@ -560,10 +563,15 @@ def main(argv: list[str] | None = None) -> int:
 
     feature_branch = plan.context.feature_branch
     existing_pr_ref = None
+    switched_branch = False
 
     try:
         if args.pr and plan.context.is_git:
             feature_branch, existing_pr_ref = prepare_pr_branch(log, plan)
+            switched_branch = (
+                plan.context.original_branch is not None
+                and feature_branch != plan.context.original_branch
+            )
 
         applied_changes = apply_ebuild_update(log, args, plan)
         refreshed_artifacts = update_manifest_and_cache(log, args, plan)
@@ -602,12 +610,11 @@ def main(argv: list[str] | None = None) -> int:
             log.rule()
             log.success("Done!")
         return result
+    except Exception as exc:
+        log.error(str(exc))
+        return 1
     finally:
-        if (
-            plan.context.is_git
-            and plan.context.original_branch
-            and plan.context.original_branch != feature_branch
-        ):
+        if switched_branch and plan.context.original_branch:
             try:
                 log.step("branch", f"return to {plan.context.original_branch}")
                 git_checkout_branch(plan.context.original_branch, plan.context.repo_root)
