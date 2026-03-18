@@ -268,7 +268,7 @@ def render_dry_run(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> i
     log.step("manifest", "skip" if args.skip_manifest else "update")
     if plan.repo_name:
         log.step("cache", "update metadata/md5-cache")
-        if plan.drop_cache_path:
+        if plan.drop_cache_path and plan.drop_cache_path.exists():
             log.step("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root)))
     else:
         log.step("cache", "skip metadata/md5-cache update (repo name unavailable)")
@@ -556,6 +556,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     plan = build_update_plan(context, normalized_version, keep_old=args.keep_old)
+    if plan.context.is_git and not args.skip_git and not plan.repo_name:
+        log.error("Could not determine repo name from profiles/repo_name")
+        return 1
+    if args.skip_manifest and plan.context.is_git and not args.skip_git:
+        log.error("--skip-manifest cannot be used for git-backed commit/PR runs")
+        return 1
     render_header(log, args, plan)
 
     if args.dry_run:

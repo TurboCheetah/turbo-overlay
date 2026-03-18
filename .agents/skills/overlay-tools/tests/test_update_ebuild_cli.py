@@ -10,6 +10,7 @@ from overlay_tools.cli.update_ebuild import (
     build_update_plan,
     collect_paths_to_stage,
     main,
+    render_dry_run,
     should_commit,
     update_manifest_and_cache,
 )
@@ -276,6 +277,30 @@ class TestCommitFlowHelpers:
                 plan,
             )
 
+    def test_render_dry_run_skips_missing_cache_removal_preview(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        messages: list[tuple[str, str]] = []
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                messages.append((label, message))
+
+            def success(self, message: str) -> None:
+                pass
+
+            def warning(self, message: str) -> None:
+                pass
+
+        result = render_dry_run(
+            Log(),
+            argparse.Namespace(my_pv=None, skip_manifest=False, pr=False, skip_git=False),
+            plan,
+        )
+
+        assert result == 0
+        assert ("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root))) not in messages
+
 
 class TestPrGuardrails:
     def test_pr_rejects_skip_git(self):
@@ -323,6 +348,36 @@ class TestPrGuardrails:
                 str(pkg_path),
             ]
         )
+
+        assert result == 1
+
+    def test_git_backed_run_requires_repo_name_before_dry_run(self, monkeypatch, tmp_path: Path):
+        pkg_path = tmp_path / "cat" / "pkg"
+        pkg_path.mkdir(parents=True)
+        (pkg_path / "pkg-1.0.0.ebuild").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+
+        result = main(["--dry-run", "--version", "1.0.1", str(pkg_path)])
+
+        assert result == 1
+
+    def test_git_backed_run_rejects_skip_manifest(self, monkeypatch, tmp_path: Path):
+        pkg_path = tmp_path / "cat" / "pkg"
+        pkg_path.mkdir(parents=True)
+        (pkg_path / "pkg-1.0.0.ebuild").write_text("", encoding="utf-8")
+        (tmp_path / "profiles").mkdir()
+        (tmp_path / "profiles" / "repo_name").write_text("test-overlay\n", encoding="utf-8")
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+
+        result = main(["--skip-manifest", "--version", "1.0.1", str(pkg_path)])
 
         assert result == 1
 
