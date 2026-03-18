@@ -14,34 +14,9 @@ from overlay_tools.core.github import (
 )
 from overlay_tools.core.logging import Logger, set_logger
 from overlay_tools.core.overlay import find_overlay_root, find_packages, get_package_latest_ebuild
-from overlay_tools.core.report import PackageStatus, render_json, render_terminal_report
+from overlay_tools.core.package_sources import get_custom_url
+from overlay_tools.core.report import PackageStatus, build_status, render_json, render_terminal_report
 from overlay_tools.core.versions import compare_versions
-
-VENDOR_URLS: dict[str, str] = {
-    "hayase": "https://hayase.watch/",
-    "warp": "https://www.warp.dev/changelog",
-}
-
-
-def get_custom_url(name: str, src_uri: str | None, homepage: str | None) -> str | None:
-    if src_uri:
-        if "hayase.watch" in src_uri:
-            return "https://hayase.watch/"
-        if "warp.dev" in src_uri:
-            return "https://www.warp.dev/changelog"
-
-    if homepage:
-        if "hayase.watch" in homepage:
-            return "https://hayase.watch/"
-        if "warp.dev" in homepage:
-            return "https://www.warp.dev/changelog"
-
-    name_lower = name.lower()
-    for vendor, url in VENDOR_URLS.items():
-        if vendor in name_lower:
-            return url
-
-    return None
 
 
 def check_package(
@@ -53,13 +28,10 @@ def check_package(
     ebuild = get_package_latest_ebuild(pkg_path)
 
     if not ebuild:
-        return PackageStatus(
+        return build_status(
             category=category,
             name=name,
             current_version="unknown",
-            latest_version=None,
-            github_repo=None,
-            custom_url=None,
             status="error",
             error_message="No ebuild found",
         )
@@ -84,7 +56,7 @@ def check_package(
                 cmp = compare_versions(current_version, release.version)
                 status = "update-available" if cmp < 0 else "up-to-date"
 
-                return PackageStatus(
+                return build_status(
                     category=category,
                     name=name,
                     current_version=current_version,
@@ -95,72 +67,60 @@ def check_package(
                     latest_url=release.url,
                     my_pv=my_pv,
                 )
-            elif custom_url:
-                return PackageStatus(
-                    category=category,
-                    name=name,
-                    current_version=current_version,
-                    latest_version=None,
-                    github_repo=github_repo,
-                    custom_url=custom_url,
-                    status="manual-check",
-                    my_pv=my_pv,
-                )
-            else:
-                return PackageStatus(
-                    category=category,
-                    name=name,
-                    current_version=current_version,
-                    latest_version=None,
-                    github_repo=github_repo,
-                    custom_url=None,
-                    status="error",
-                    error_message="No releases or tags found",
-                    my_pv=my_pv,
-                )
-        except GitHubAPIError as e:
             if custom_url:
-                return PackageStatus(
+                return build_status(
                     category=category,
                     name=name,
                     current_version=current_version,
-                    latest_version=None,
                     github_repo=github_repo,
                     custom_url=custom_url,
                     status="manual-check",
                     my_pv=my_pv,
                 )
-            return PackageStatus(
+            return build_status(
                 category=category,
                 name=name,
                 current_version=current_version,
-                latest_version=None,
                 github_repo=github_repo,
-                custom_url=None,
+                status="error",
+                error_message="No releases or tags found",
+                my_pv=my_pv,
+            )
+        except GitHubAPIError as e:
+            if custom_url:
+                return build_status(
+                    category=category,
+                    name=name,
+                    current_version=current_version,
+                    github_repo=github_repo,
+                    custom_url=custom_url,
+                    status="manual-check",
+                    my_pv=my_pv,
+                )
+            return build_status(
+                category=category,
+                name=name,
+                current_version=current_version,
+                github_repo=github_repo,
                 status="error",
                 error_message=str(e),
                 my_pv=my_pv,
             )
 
     if custom_url:
-        return PackageStatus(
+        return build_status(
             category=category,
             name=name,
             current_version=current_version,
-            latest_version=None,
-            github_repo=None,
             custom_url=custom_url,
             status="manual-check",
             my_pv=my_pv,
         )
 
-    return PackageStatus(
+    return build_status(
         category=category,
         name=name,
         current_version=current_version,
-        latest_version=None,
-        github_repo=None,
-        custom_url=None,
         status="unknown",
         my_pv=my_pv,
     )
@@ -213,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     github_client = GitHubClient(token=github_token, cache_dir=cache_dir)
 
     packages = find_packages(overlay_root)
+    log.banner("overlay-tools", "Check upstream package updates")
 
     if args.package:
         packages = [p for p in packages if p.atom == args.package]
@@ -231,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(render_json(results))
     else:
-        render_terminal_report(results, verbose=args.verbose)
+        render_terminal_report(results)
 
     if any(p.status == "error" for p in results):
         return 1

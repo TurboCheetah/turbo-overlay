@@ -11,7 +11,9 @@ if TYPE_CHECKING:
 
 def _get_rich() -> tuple[Any, ...] | None:
     try:
+        from rich.box import ROUNDED
         from rich.console import Console
+        from rich.panel import Panel
         from rich.progress import (
             BarColumn,
             Progress,
@@ -20,12 +22,18 @@ def _get_rich() -> tuple[Any, ...] | None:
             TextColumn,
             TimeElapsedColumn,
         )
+        from rich.table import Table
+        from rich.text import Text
         from rich.theme import Theme
 
         return (
             Console,
+            Panel,
             Progress,
+            Table,
+            Text,
             Theme,
+            ROUNDED,
             SpinnerColumn,
             TextColumn,
             BarColumn,
@@ -46,7 +54,25 @@ THEME_DICT = {
     "version": "bold cyan",
     "version.old": "dim",
     "version.new": "bold yellow",
+    "accent": "bold bright_cyan",
+    "muted": "bright_black",
 }
+
+PLAIN_ICONS = {
+    "info": "[INFO]",
+    "success": "[OK]",
+    "warning": "[WARN]",
+    "error": "[ERROR]",
+    "debug": "[DEBUG]",
+}
+
+RICH_ICONS = {
+    "info": "ℹ",
+    "success": "✓",
+    "warning": "⚠",
+    "error": "✗",
+}
+GENTOO_ICON = ""
 
 
 class Logger:
@@ -56,7 +82,7 @@ class Logger:
 
         rich_imports = _get_rich()
         if rich_imports:
-            Console, _, Theme, *_ = rich_imports
+            Console, _, _, _, _, Theme, *_ = rich_imports
             theme = Theme(THEME_DICT)
             self.console: Any = Console(theme=theme, stderr=True)
             self.stdout: Any = Console(theme=theme)
@@ -66,33 +92,33 @@ class Logger:
             self.stdout = None
             self._rich = None
 
-    def info(self, message: str, **kwargs: Any) -> None:
+    def banner(self, title: str, subtitle: str | None = None) -> None:
         if self.quiet:
             return
-        if self.console:
-            self.console.print(f"[info]ℹ[/info]  {message}", **kwargs)
+        if self.console and self._rich:
+            _, Panel, _, _, Text, _, box_style, *_ = self._rich
+            header = Text()
+            header.append(f"{GENTOO_ICON} ", style="accent")
+            header.append(title, style="package")
+            if subtitle:
+                header.append(f"\n{subtitle}", style="dim")
+            self.console.print(Panel(header, box=box_style, border_style="accent", padding=(0, 2)))
         else:
-            print(f"[INFO] {message}", file=sys.stderr)
+            print(title, file=sys.stderr)
+            if subtitle:
+                print(subtitle, file=sys.stderr)
+
+    def info(self, message: str, **kwargs: Any) -> None:
+        self._print("info", message, **kwargs)
 
     def success(self, message: str, **kwargs: Any) -> None:
-        if self.quiet:
-            return
-        if self.console:
-            self.console.print(f"[success]✓[/success]  {message}", **kwargs)
-        else:
-            print(f"[OK] {message}", file=sys.stderr)
+        self._print("success", message, **kwargs)
 
     def warning(self, message: str, **kwargs: Any) -> None:
-        if self.console:
-            self.console.print(f"[warning]⚠[/warning]  {message}", **kwargs)
-        else:
-            print(f"[WARN] {message}", file=sys.stderr)
+        self._print("warning", message, **kwargs)
 
     def error(self, message: str, **kwargs: Any) -> None:
-        if self.console:
-            self.console.print(f"[error]✗[/error]  {message}", **kwargs)
-        else:
-            print(f"[ERROR] {message}", file=sys.stderr)
+        self._print("error", message, **kwargs)
 
     def debug(self, message: str, **kwargs: Any) -> None:
         if not self.verbose:
@@ -100,7 +126,7 @@ class Logger:
         if self.console:
             self.console.print(f"[dim]   → {message}[/dim]", **kwargs)
         else:
-            print(f"[DEBUG] {message}", file=sys.stderr)
+            print(f"{PLAIN_ICONS['debug']} {message}", file=sys.stderr)
 
     def package(self, category: str, name: str, action: str = "") -> None:
         if self.quiet:
@@ -117,6 +143,21 @@ class Logger:
             else:
                 print(pkg, file=sys.stderr)
 
+    def package_summary(self, category: str, name: str, old: str, new: str) -> None:
+        if self.quiet:
+            return
+        if self.console and self._rich:
+            _, _, _, Table, _, _, box_style, *_ = self._rich
+            table = Table(box=box_style, border_style="muted", show_header=False, pad_edge=False)
+            table.add_column(style="dim", no_wrap=True)
+            table.add_column()
+            table.add_row("Package", f"[package]{category}/{name}[/package]")
+            table.add_row("Change", f"[version.old]{old}[/version.old] → [version.new]{new}[/version.new]")
+            self.console.print(table)
+        else:
+            print(f"{category}/{name}", file=sys.stderr)
+            print(f"  {old} -> {new}", file=sys.stderr)
+
     def version_change(self, old: str, new: str) -> None:
         if self.quiet:
             return
@@ -127,16 +168,34 @@ class Logger:
         else:
             print(f"  {old} -> {new}", file=sys.stderr)
 
+    def step(self, label: str, message: str, *, level: str = "info") -> None:
+        if self.quiet:
+            return
+        if self.console:
+            self.console.print(f"[accent]{label:>10}[/accent] [dim]•[/dim] {message}")
+        else:
+            self._print(level, f"{label}: {message}")
+
     def rule(self, title: str = "") -> None:
         if self.quiet:
             return
         if self.console:
-            self.console.rule(title, style="dim")
+            self.console.rule(title, style="muted")
         else:
             if title:
                 print(f"--- {title} ---", file=sys.stderr)
             else:
                 print("-" * 40, file=sys.stderr)
+
+    def _print(self, level: str, message: str, **kwargs: Any) -> None:
+        if self.quiet:
+            return
+        style = level if level in THEME_DICT else "info"
+        if self.console:
+            icon = RICH_ICONS.get(level, RICH_ICONS["info"])
+            self.console.print(f"[{style}]{icon}[/{style}]  {message}", **kwargs)
+        else:
+            print(f"{PLAIN_ICONS.get(level, PLAIN_ICONS['info'])} {message}", file=sys.stderr)
 
     @contextmanager
     def progress(self, description: str, total: int) -> Generator[ProgressContext, None, None]:
@@ -161,7 +220,11 @@ class ProgressContext:
         if self.logger._rich and not self.logger.quiet:
             (
                 _,
+                _,
                 Progress,
+                _,
+                _,
+                _,
                 _,
                 SpinnerColumn,
                 TextColumn,
@@ -170,7 +233,7 @@ class ProgressContext:
                 TimeElapsedColumn,
             ) = self.logger._rich
             self._progress = Progress(
-                SpinnerColumn(),
+                SpinnerColumn(style="accent"),
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(bar_width=30),
                 TaskProgressColumn(),
@@ -179,7 +242,7 @@ class ProgressContext:
                 transient=True,
             )
             self._progress.start()
-            self._task_id = self._progress.add_task(f"[cyan]{self.description}", total=self.total)
+            self._task_id = self._progress.add_task(f"[accent]{self.description}", total=self.total)
 
     def _stop(self) -> None:
         if self._progress:
@@ -191,7 +254,7 @@ class ProgressContext:
             if description:
                 self._progress.update(
                     self._task_id,
-                    description=f"[cyan]{description}",
+                    description=f"[accent]{description}",
                     advance=1,
                 )
             else:
