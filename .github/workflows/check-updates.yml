@@ -211,6 +211,10 @@ jobs:
             echo "Processing ${ATOM} -> ${VERSION}"
             echo "Running: update-ebuild ${ARGS[*]} ${ATOM}"
 
+            git checkout -B master origin/master
+            git reset --hard origin/master
+            git clean -fd
+
             if ! .agents/skills/overlay-tools/bin/update-ebuild "${ARGS[@]}" "${ATOM}"; then
               echo "::error::Failed to create PR for ${ATOM} - check logs above for details"
               failures=$((failures + 1))
