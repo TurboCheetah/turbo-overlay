@@ -477,6 +477,11 @@ def collect_paths_to_stage(
     refreshed_artifacts: RefreshedArtifacts,
 ) -> list[Path]:
     paths_to_add = [plan.new_path, *refreshed_artifacts.paths]
+    cache_dir = plan.context.repo_root / "metadata" / "md5-cache" / plan.context.category
+    if plan.new_cache_path in refreshed_artifacts.paths and cache_dir.exists():
+        for cache_path in sorted(cache_dir.glob(f"{plan.context.name}-*")):
+            if cache_path not in paths_to_add:
+                paths_to_add.append(cache_path)
     if applied_changes.deleted_ebuild_path:
         paths_to_add.append(applied_changes.deleted_ebuild_path)
     if applied_changes.deleted_cache_path:

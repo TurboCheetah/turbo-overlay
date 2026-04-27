@@ -307,6 +307,29 @@ class TestCommitFlowHelpers:
             plan.drop_cache_path,
         ]
 
+    def test_collect_paths_to_stage_includes_package_cache_siblings(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        manifest_path = context.pkg_path / "Manifest"
+        plan.new_path.write_text("", encoding="utf-8")
+        plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.new_cache_path.write_text("", encoding="utf-8")
+        old_cache_path = plan.new_cache_path.parent / "t3code-bin-0.0.9"
+        old_cache_path.write_text("", encoding="utf-8")
+
+        paths = collect_paths_to_stage(
+            plan,
+            AppliedChanges(deleted_ebuild_path=None, deleted_cache_path=None),
+            RefreshedArtifacts(paths=(manifest_path, plan.new_cache_path)),
+        )
+
+        assert paths == [
+            plan.new_path,
+            manifest_path,
+            plan.new_cache_path,
+            old_cache_path,
+        ]
+
     def test_collect_paths_to_stage_skips_stale_manifest_and_cache(self, tmp_path: Path):
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
