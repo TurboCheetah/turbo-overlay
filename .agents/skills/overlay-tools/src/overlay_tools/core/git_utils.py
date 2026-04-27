@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CalledProcessError
 
 from overlay_tools.core.errors import ExternalToolMissingError
 from overlay_tools.core.subprocess_utils import run
@@ -75,6 +76,16 @@ def git_fetch_branch(repo_root: Path, branch: str, *, remote: str = "origin") ->
         capture=True,
     )
     return result.returncode == 0
+
+
+def format_git_error(exc: BaseException) -> str:
+    parts = [str(exc)]
+    if isinstance(exc, CalledProcessError):
+        if exc.stdout:
+            parts.append(str(exc.stdout).strip())
+        if exc.stderr and exc.stderr != exc.stdout:
+            parts.append(str(exc.stderr).strip())
+    return " | ".join(part for part in parts if part)
 
 
 def git_checkout_branch(
@@ -175,6 +186,13 @@ def git_add(paths: list[Path], repo_root: Path) -> None:
 
 def git_commit(message: str, repo_root: Path) -> None:
     run(["git", "commit", "-m", message], cwd=repo_root, check=True)
+
+
+def git_has_staged_changes(repo_root: Path) -> bool:
+    result = run(["git", "diff", "--cached", "--quiet"], cwd=repo_root, check=False)
+    if result.returncode not in (0, 1):
+        result.check_returncode()
+    return result.returncode == 1
 
 
 def git_status(repo_root: Path) -> str:

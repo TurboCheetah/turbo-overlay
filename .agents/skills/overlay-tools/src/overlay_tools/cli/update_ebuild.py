@@ -11,12 +11,16 @@ from subprocess import CalledProcessError
 from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, select_latest_ebuild, update_ebuild_var
 from overlay_tools.core.errors import ExternalToolMissingError, VersionError
 from overlay_tools.core.git_utils import (
+    format_git_error,
     git_add,
     git_branch_exists,
     git_checkout_branch,
     git_commit,
     git_current_branch,
     git_default_branch,
+    git_fetch_branch,
+    git_has_changes,
+    git_has_staged_changes,
     git_push,
     git_root,
     is_git_repo,
@@ -338,6 +342,11 @@ def render_dry_run(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> i
 def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None]:
     from overlay_tools.core.gh_utils import gh_find_open_update_pr_for_package, gh_require_available
 
+    if git_has_changes(plan.context.repo_root):
+        raise RuntimeError(
+            "Working tree has uncommitted changes; commit or stash them before using --pr"
+        )
+
     feature_branch = plan.context.feature_branch
     existing_pr_ref = None
 
@@ -358,10 +367,14 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
         log.warning(f"Could not check for existing PRs: {exc}")
         log.info("Will create new PR if none exists for this branch")
 
+    remote_exists = git_branch_exists(feature_branch, plan.context.repo_root, remote=True)
+
     if git_branch_exists(feature_branch, plan.context.repo_root):
+        if remote_exists:
+            git_fetch_branch(plan.context.repo_root, feature_branch)
         log.step("branch", f"checkout existing {feature_branch}")
         git_checkout_branch(feature_branch, plan.context.repo_root)
-    elif git_branch_exists(feature_branch, plan.context.repo_root, remote=True):
+    elif remote_exists:
         log.step("branch", f"track origin/{feature_branch}")
         git_checkout_branch(feature_branch, plan.context.repo_root, track_remote=True)
     else:
@@ -493,6 +506,10 @@ def should_commit(log: Logger, args: argparse.Namespace) -> bool:
 
 def commit_changes(log: Logger, plan: UpdatePlan, paths_to_add: list[Path]) -> None:
     git_add(paths_to_add, plan.context.repo_root)
+    if not git_has_staged_changes(plan.context.repo_root):
+        log.info("No changes to commit; branch already contains this update")
+        return
+
     git_commit(plan.commit_message, plan.context.repo_root)
     log.success(f"Committed: {plan.commit_message}")
 
@@ -669,7 +686,8 @@ def main(argv: list[str] | None = None) -> int:
                 git_checkout_branch(plan.context.original_branch, plan.context.repo_root)
             except Exception as exc:
                 log.error(
-                    f"Failed to return to branch {plan.context.original_branch}: {exc}"
+                    "Failed to return to branch "
+                    f"{plan.context.original_branch}: {format_git_error(exc)}"
                 )
 
 

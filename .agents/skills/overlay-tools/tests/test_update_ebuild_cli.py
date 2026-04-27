@@ -9,8 +9,10 @@ from overlay_tools.cli.update_ebuild import (
     RefreshedArtifacts,
     UpdateContext,
     build_update_plan,
+    commit_changes,
     collect_paths_to_stage,
     main,
+    prepare_pr_branch,
     render_dry_run,
     should_commit,
     update_manifest_and_cache,
@@ -147,6 +149,115 @@ def make_context(tmp_path: Path) -> UpdateContext:
 
 
 class TestCommitFlowHelpers:
+    def test_commit_changes_commits_when_staged_changes_exist(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        calls: list[tuple[str, object]] = []
+
+        class Log:
+            def info(self, message: str) -> None:
+                calls.append(("info", message))
+
+            def success(self, message: str) -> None:
+                calls.append(("success", message))
+
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_add",
+            lambda paths, repo_root: calls.append(("add", paths)),
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_staged_changes",
+            lambda repo_root: True,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_commit",
+            lambda message, repo_root: calls.append(("commit", message)),
+        )
+
+        commit_changes(Log(), plan, [plan.new_path])
+
+        assert ("commit", plan.commit_message) in calls
+        assert ("success", f"Committed: {plan.commit_message}") in calls
+
+    def test_commit_changes_treats_noop_as_success(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        messages: list[str] = []
+
+        class Log:
+            def info(self, message: str) -> None:
+                messages.append(message)
+
+            def success(self, message: str) -> None:
+                pass
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_staged_changes",
+            lambda repo_root: False,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_commit",
+            lambda message, repo_root: (_ for _ in ()).throw(AssertionError("should not commit")),
+        )
+
+        commit_changes(Log(), plan, [plan.new_path])
+
+        assert messages == ["No changes to commit; branch already contains this update"]
+
+    def test_prepare_pr_branch_rejects_dirty_worktree(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+
+        class Log:
+            pass
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: True)
+
+        with pytest.raises(RuntimeError, match="Working tree has uncommitted changes"):
+            prepare_pr_branch(Log(), plan)
+
+    def test_prepare_pr_branch_fetches_existing_remote_branch(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        calls: list[tuple[str, str]] = []
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                calls.append((label, message))
+
+            def warning(self, message: str) -> None:
+                pass
+
+            def info(self, message: str) -> None:
+                pass
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False)
+        monkeypatch.setattr("overlay_tools.core.gh_utils.gh_require_available", lambda: None)
+        monkeypatch.setattr(
+            "overlay_tools.core.gh_utils.gh_find_open_update_pr_for_package",
+            lambda repo_root, category, name, base: None,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_branch_exists",
+            lambda branch, repo_root, remote=False: True,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_fetch_branch",
+            lambda repo_root, branch: calls.append(("fetch", branch)) or True,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_checkout_branch",
+            lambda branch, repo_root, create=False, start_point=None, track_remote=False: calls.append(("checkout", branch)),
+        )
+
+        feature_branch, existing_pr = prepare_pr_branch(Log(), plan)
+
+        assert feature_branch == context.feature_branch
+        assert existing_pr is None
+        assert ("fetch", context.feature_branch) in calls
+        assert ("checkout", context.feature_branch) in calls
+
     def test_collect_paths_to_stage_skips_missing_deleted_cache(self, tmp_path: Path):
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
@@ -525,6 +636,7 @@ class TestPrGuardrails:
             lambda branch, repo_root, create=False, start_point=None, track_remote=False: checkout_calls.append(branch),
         )
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None)
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_staged_changes", lambda repo_root: True)
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_commit", lambda message, repo_root: None)
 
         result = main(["-y", "--version", "1.0.1", str(pkg_path)])

@@ -9,6 +9,7 @@ from overlay_tools.core.git_utils import (
     git_default_branch,
     git_fetch_branch,
     git_has_changes,
+    git_has_staged_changes,
     git_push,
     git_root,
     git_status,
@@ -158,6 +159,18 @@ class TestGitHasChanges:
         with patch("overlay_tools.core.git_utils.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="")
             assert git_has_changes(tmp_path) is False
+
+
+class TestGitHasStagedChanges:
+    def test_has_staged_changes(self, tmp_path):
+        with patch("overlay_tools.core.git_utils.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            assert git_has_staged_changes(tmp_path) is True
+
+    def test_no_staged_changes(self, tmp_path):
+        with patch("overlay_tools.core.git_utils.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert git_has_staged_changes(tmp_path) is False
 
 
 class TestGitBranchExists:
