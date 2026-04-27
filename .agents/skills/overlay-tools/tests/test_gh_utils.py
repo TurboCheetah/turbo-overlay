@@ -1,6 +1,7 @@
 import pytest
 import json
 from pathlib import Path
+from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
 
 from overlay_tools.core.gh_utils import (
@@ -255,6 +256,34 @@ class TestGhEditPr:
             with patch("overlay_tools.core.gh_utils.run") as mock_run:
                 gh_edit_pr(tmp_path, number=42)
                 mock_run.assert_not_called()
+
+    def test_falls_back_to_rest_api_when_pr_edit_fails(self, tmp_path):
+        with patch("shutil.which", return_value="/usr/bin/gh"):
+            with patch("overlay_tools.core.gh_utils.run") as mock_run:
+                mock_run.side_effect = [
+                    CalledProcessError(1, ["gh", "pr", "edit", "42"]),
+                    MagicMock(returncode=0),
+                ]
+
+                gh_edit_pr(
+                    tmp_path,
+                    number=42,
+                    title="New Title",
+                    body="New Body",
+                )
+
+                api_cmd = mock_run.call_args_list[1][0][0]
+                assert api_cmd == [
+                    "gh",
+                    "api",
+                    "-X",
+                    "PATCH",
+                    "repos/:owner/:repo/pulls/42",
+                    "-f",
+                    "title=New Title",
+                    "-f",
+                    "body=New Body",
+                ]
 
 
 class TestGhCreatePr:

@@ -4,6 +4,7 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import CalledProcessError
 
 from overlay_tools.core.errors import ExternalToolMissingError
 from overlay_tools.core.subprocess_utils import run
@@ -153,7 +154,16 @@ def gh_edit_pr(
     if len(cmd) == 4:  # No updates specified
         return
 
-    run(cmd, cwd=repo_root, check=True)
+    try:
+        run(cmd, cwd=repo_root, check=True)
+        return
+    except CalledProcessError:
+        api_cmd = ["gh", "api", "-X", "PATCH", f"repos/:owner/:repo/pulls/{number}"]
+        if title:
+            api_cmd.extend(["-f", f"title={title}"])
+        if body:
+            api_cmd.extend(["-f", f"body={body}"])
+        run(api_cmd, cwd=repo_root, check=True)
 
 
 def gh_create_pr(
