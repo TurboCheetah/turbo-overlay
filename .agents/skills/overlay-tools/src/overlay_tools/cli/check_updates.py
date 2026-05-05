@@ -16,7 +16,7 @@ from overlay_tools.core.logging import Logger, set_logger
 from overlay_tools.core.overlay import find_overlay_root, find_packages, get_package_latest_ebuild
 from overlay_tools.core.package_sources import get_custom_url
 from overlay_tools.core.report import PackageStatus, build_status, render_json, render_terminal_report
-from overlay_tools.core.versions import compare_versions
+from overlay_tools.core.versions import compare_versions, upstream_to_gentoo
 
 
 def check_package(
@@ -55,12 +55,14 @@ def check_package(
             if release:
                 cmp = compare_versions(current_version, release.version)
                 status = "update-available" if cmp < 0 else "up-to-date"
+                gentoo_version = upstream_to_gentoo(release.version)
 
                 return build_status(
                     category=category,
                     name=name,
                     current_version=current_version,
                     latest_version=release.version,
+                    gentoo_version=gentoo_version,
                     github_repo=github_repo,
                     custom_url=custom_url,
                     status=status,

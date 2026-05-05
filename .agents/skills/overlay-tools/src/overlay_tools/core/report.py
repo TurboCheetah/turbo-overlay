@@ -25,6 +25,7 @@ class PackageStatus:
     name: str
     current_version: str
     latest_version: str | None
+    gentoo_version: str | None
     github_repo: str | None
     custom_url: str | None
     status: str
@@ -57,6 +58,7 @@ def build_status(
     status: str,
     *,
     latest_version: str | None = None,
+    gentoo_version: str | None = None,
     github_repo: str | None = None,
     custom_url: str | None = None,
     error_message: str | None = None,
@@ -68,6 +70,7 @@ def build_status(
         name=name,
         current_version=current_version,
         latest_version=latest_version,
+        gentoo_version=gentoo_version,
         github_repo=github_repo,
         custom_url=custom_url,
         status=status,

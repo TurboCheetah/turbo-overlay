@@ -193,15 +193,16 @@ jobs:
           while IFS= read -r update; do
             CATEGORY="$(jq -r '.category' <<<"${update}")"
             NAME="$(jq -r '.name' <<<"${update}")"
-            VERSION="$(jq -r '.latest_version' <<<"${update}")"
+            VERSION="$(jq -r '.gentoo_version // empty' <<<"${update}")"
             MY_PV="$(jq -r '.my_pv // empty' <<<"${update}")"
+            UPSTREAM_VERSION="$(jq -r '.latest_version // empty' <<<"${update}")"
             UPSTREAM_URL="$(jq -r '.latest_url // empty' <<<"${update}")"
             ATOM="${CATEGORY}/${NAME}"
 
             ARGS=("--pr" "--base" "master" "--version" "${VERSION}")
 
             if [[ -n "${MY_PV}" ]]; then
-              ARGS+=("--my-pv" "${MY_PV}")
+              ARGS+=("--my-pv" "${UPSTREAM_VERSION}")
             fi
 
             if [[ -n "${UPSTREAM_URL}" ]]; then
