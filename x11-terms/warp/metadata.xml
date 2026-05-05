@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Warp is a modern, Rust-based terminal with AI built in so you
+		and your team can build great software, faster. Now available
+		on MacOS, Linux, and Windows.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">warpdotdev/Warp</remote-id>
+		<bugs-to>https://github.com/warpdotdev/Warp/issues</bugs-to>
+	</upstream>
+</pkgmetadata>
