@@ -130,6 +130,14 @@ class TestUpstreamToGentoo:
         result = upstream_to_gentoo("1.2.3.stable_04")
         assert result == "1.2.3_p04"
 
+    def test_converts_preview_suffix(self):
+        result = upstream_to_gentoo("0.2026.05.06.09.13.preview_00")
+        assert result == "0.2026.05.06.09.13_pre00"
+
+    def test_converts_preview_with_v_prefix(self):
+        result = upstream_to_gentoo("v0.2026.05.06.09.13.preview_00")
+        assert result == "0.2026.05.06.09.13_pre00"
+
 
 class TestGentooVersionToPep440:
     def test_alpha(self):

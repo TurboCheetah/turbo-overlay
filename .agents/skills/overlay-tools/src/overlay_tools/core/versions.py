@@ -20,6 +20,7 @@ GENTOO_VERSION_RE = re.compile(
 )
 
 STABLE_SUFFIX_RE = re.compile(r"^(?P<base>.+)\.stable_(?P<num>\d+)$")
+PREVIEW_SUFFIX_RE = re.compile(r"^(?P<base>.+)\.preview_(?P<num>\d+)$")
 V_PREFIX_RE = re.compile(r"^[vV]")
 PREFIXED_VERSION_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*[-_](?P<version>\d.*)$")
 
@@ -88,6 +89,10 @@ def normalize_gentoo_version(v: str, lenient: bool = False) -> str:
         if stable_match:
             v = f"{stable_match.group('base')}_p{stable_match.group('num')}"
 
+        preview_match = PREVIEW_SUFFIX_RE.match(v)
+        if preview_match:
+            v = f"{preview_match.group('base')}_pre{preview_match.group('num')}"
+
     if GENTOO_VERSION_RE.match(v):
         return v
 
@@ -142,5 +147,11 @@ def upstream_to_gentoo(upstream: str, suffix_map: dict[str, str] | None = None) 
     stable_match = STABLE_SUFFIX_RE.match(v)
     if stable_match:
         v = f"{stable_match.group('base')}_p{stable_match.group('num')}"
+        return v
+
+    preview_match = PREVIEW_SUFFIX_RE.match(v)
+    if preview_match:
+        v = f"{preview_match.group('base')}_pre{preview_match.group('num')}"
+        return v
 
     return v
