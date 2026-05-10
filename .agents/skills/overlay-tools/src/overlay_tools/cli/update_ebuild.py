@@ -402,13 +402,16 @@ def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan)
     deleted_oldest = None
     deleted_cache_path = None
     if plan.drop_ebuild:
-        log.step("drop", plan.drop_ebuild.path.name)
-        plan.drop_ebuild.path.unlink()
-        deleted_oldest = plan.drop_ebuild.path
-        if plan.drop_cache_path and plan.drop_cache_path.exists():
-            log.step("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root)))
-            plan.drop_cache_path.unlink()
-            deleted_cache_path = plan.drop_cache_path
+        if plan.drop_ebuild.path.exists():
+            log.step("drop", plan.drop_ebuild.path.name)
+            plan.drop_ebuild.path.unlink()
+            deleted_oldest = plan.drop_ebuild.path
+            if plan.drop_cache_path and plan.drop_cache_path.exists():
+                log.step("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root)))
+                plan.drop_cache_path.unlink()
+                deleted_cache_path = plan.drop_cache_path
+        else:
+            log.info(f"Skipping drop of {plan.drop_ebuild.path.name} (already removed)")
 
     return AppliedChanges(
         deleted_ebuild_path=deleted_oldest,
@@ -509,14 +512,15 @@ def should_commit(log: Logger, args: argparse.Namespace) -> bool:
             return False
 
 
-def commit_changes(log: Logger, plan: UpdatePlan, paths_to_add: list[Path]) -> None:
+def commit_changes(log: Logger, plan: UpdatePlan, paths_to_add: list[Path], message: str | None = None) -> None:
     git_add(paths_to_add, plan.context.repo_root)
     if not git_has_staged_changes(plan.context.repo_root):
         log.info("No changes to commit; branch already contains this update")
         return
 
-    git_commit(plan.commit_message, plan.context.repo_root)
-    log.success(f"Committed: {plan.commit_message}")
+    commit_msg = message or plan.commit_message
+    git_commit(commit_msg, plan.context.repo_root)
+    log.success(f"Committed: {commit_msg}")
 
 
 def create_or_update_pr(
@@ -662,7 +666,14 @@ def main(argv: list[str] | None = None) -> int:
             log.info("Changes not committed")
             return 0
         paths_to_add = collect_paths_to_stage(plan, applied_changes, refreshed_artifacts)
-        commit_changes(log, plan, paths_to_add)
+
+        # Recompute commit message from actual changes (drop may have been
+        # skipped if it was already done in a prior run on this branch)
+        commit_msg = plan.commit_message
+        if plan.drop_ebuild and applied_changes.deleted_ebuild_path is None:
+            commit_msg = f"{plan.context.category}/{plan.context.name}: add {plan.normalized_version}"
+
+        commit_changes(log, plan, paths_to_add, message=commit_msg)
 
         if not args.pr:
             log.rule()
