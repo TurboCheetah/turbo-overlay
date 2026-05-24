@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from functools import cmp_to_key
 from pathlib import Path
 
-from overlay_tools.core.ebuilds import read_ebuild_vars
+from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, read_ebuild_vars
 from overlay_tools.core.github import (
     GitHubAPIError,
     GitHubClient,
@@ -13,29 +14,46 @@ from overlay_tools.core.github import (
     extract_github_repo_from_path,
 )
 from overlay_tools.core.logging import Logger, set_logger
-from overlay_tools.core.overlay import find_overlay_root, find_packages, get_package_latest_ebuild
+from overlay_tools.core.overlay import find_overlay_root, find_packages
 from overlay_tools.core.package_sources import get_custom_url
 from overlay_tools.core.report import PackageStatus, build_status, render_json, render_terminal_report
 from overlay_tools.core.versions import compare_versions, upstream_to_gentoo
 
 
-def check_package(
+CHANNEL_SUFFIXES = ("stable", "preview", "dev")
+
+
+def _derive_channel(my_pv: str | None) -> str | None:
+    """Derive release channel from MY_PV value (e.g., '.stable_' -> 'stable')."""
+    if not my_pv:
+        return None
+    for ch in CHANNEL_SUFFIXES:
+        if f".{ch}_" in my_pv:
+            return ch
+    return None
+
+
+def _group_ebuilds_by_channel(ebuilds: list[EbuildName]) -> dict[str | None, EbuildName]:
+    """Group ebuilds by channel, returning the latest ebuild per channel."""
+    groups: dict[str | None, list[EbuildName]] = {}
+    for eb in ebuilds:
+        vars_ = read_ebuild_vars(eb.path, {"MY_PV"})
+        ch = _derive_channel(vars_.get("MY_PV"))
+        groups.setdefault(ch, []).append(eb)
+
+    return {
+        ch: max(ebs, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv)))
+        for ch, ebs in groups.items()
+    }
+
+
+def check_channel_ebuild(
     category: str,
     name: str,
+    ebuild: EbuildName,
     pkg_path: Path,
     github_client: GitHubClient,
 ) -> PackageStatus:
-    ebuild = get_package_latest_ebuild(pkg_path)
-
-    if not ebuild:
-        return build_status(
-            category=category,
-            name=name,
-            current_version="unknown",
-            status="error",
-            error_message="No ebuild found",
-        )
-
     current_version = ebuild.pv
     ebuild_vars = read_ebuild_vars(ebuild.path, {"SRC_URI", "HOMEPAGE", "MY_PV"})
     src_uri = ebuild_vars.get("SRC_URI")
@@ -48,10 +66,11 @@ def check_package(
     custom_url = get_custom_url(name, src_uri, homepage)
 
     my_pv = ebuild_vars.get("MY_PV")
+    channel = _derive_channel(my_pv)
 
     if github_repo:
         try:
-            release = github_client.get_latest_release(github_repo)
+            release = github_client.get_latest_release(github_repo, channel=channel)
             if release:
                 cmp = compare_versions(current_version, release.version)
                 status = "update-available" if cmp < 0 else "up-to-date"
@@ -126,6 +145,40 @@ def check_package(
         status="unknown",
         my_pv=my_pv,
     )
+
+
+def check_package(
+    category: str,
+    name: str,
+    pkg_path: Path,
+    github_client: GitHubClient,
+) -> PackageStatus:
+    ebuilds = find_ebuilds(pkg_path)
+    if not ebuilds:
+        return build_status(
+            category=category,
+            name=name,
+            current_version="unknown",
+            status="error",
+            error_message="No ebuilds found",
+        )
+
+    channels = _group_ebuilds_by_channel(ebuilds)
+    if not channels:
+        return build_status(
+            category=category,
+            name=name,
+            current_version="unknown",
+            status="error",
+            error_message="No channel groups found",
+        )
+
+    # Pick the channel whose latest ebuild is the overall highest version.
+    # This is the ebuild Portage would select by default — check *that*
+    # channel against upstream.
+    best_channel = max(channels.items(), key=cmp_to_key(lambda a, b: compare_versions(a[1].pv, b[1].pv)))  # type: ignore[arg-type]
+    _, best_ebuild = best_channel
+    return check_channel_ebuild(category, name, best_ebuild, pkg_path, github_client)
 
 
 def main(argv: list[str] | None = None) -> int:

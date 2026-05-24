@@ -108,12 +108,17 @@ class GitHubClient:
         except OSError:
             pass
 
-    def get_latest_release(self, repo: str) -> ReleaseInfo | None:
+    def get_latest_release(self, repo: str, channel: str | None = None) -> ReleaseInfo | None:
         cached = self._read_cache(repo)
         if cached:
             return cached
 
         url = f"{self.API_BASE}/repos/{repo}/releases/latest"
+
+        if channel is not None:
+            # Channel-aware: fetch recent releases and pick the latest matching this channel
+            return self._get_latest_release_for_channel(repo, channel)
+
         try:
             response = self.session.get(url, timeout=10)
 
@@ -141,6 +146,44 @@ class GitHubClient:
 
             self._write_cache(repo, info)
             return info
+
+        except requests.RequestException as e:
+            raise GitHubAPIError(f"API error for {repo}: {e}") from e
+        except ValueError as e:
+            raise GitHubAPIError(f"Invalid JSON response for {repo}: {e}") from e
+
+    def _get_latest_release_for_channel(self, repo: str, channel: str) -> ReleaseInfo | None:
+        tag_suffix = f".{channel}_"
+        url = f"{self.API_BASE}/repos/{repo}/releases?per_page=30"
+        try:
+            response = self.session.get(url, timeout=10)
+
+            if response.status_code == 403:
+                remaining = response.headers.get("X-RateLimit-Remaining", "0")
+                if remaining == "0":
+                    reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
+                    wait_minutes = max(0, (reset_time - time.time()) / 60)
+                    raise GitHubRateLimitError(
+                        f"Rate limit exceeded. Resets in {wait_minutes:.0f} minutes."
+                    )
+
+            response.raise_for_status()
+            releases = response.json()
+
+            for release in releases:
+                if release.get("draft"):
+                    continue
+                tag = release.get("tag_name", "")
+                if tag_suffix in tag:
+                    info = ReleaseInfo(
+                        tag=tag,
+                        version=normalize_upstream_version(tag),
+                        url=release.get("html_url", ""),
+                    )
+                    self._write_cache(repo, info)
+                    return info
+
+            return None
 
         except requests.RequestException as e:
             raise GitHubAPIError(f"API error for {repo}: {e}") from e
