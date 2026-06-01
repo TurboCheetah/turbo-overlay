@@ -372,7 +372,10 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
     remote_exists = git_branch_exists(feature_branch, plan.context.repo_root, remote=True)
 
     if existing_pr_ref is None and (local_exists or remote_exists):
-        git_fetch_branch(plan.context.repo_root, plan.context.base_branch)
+        if not git_fetch_branch(plan.context.repo_root, plan.context.base_branch):
+            raise RuntimeError(
+                f"Failed to fetch origin/{plan.context.base_branch} before resetting {feature_branch}"
+            )
         log.step(
             "branch",
             f"reset stale {feature_branch} from origin/{plan.context.base_branch}",
