@@ -264,6 +264,46 @@ class TestCommitFlowHelpers:
         assert ("reset", context.feature_branch, f"origin/{context.base_branch}") in calls
         assert not any(call[0] == "checkout" for call in calls)
 
+    def test_prepare_pr_branch_aborts_stale_branch_reset_when_base_fetch_fails(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        calls: list[tuple[str, str, str | None]] = []
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                calls.append((label, message, None))
+
+            def warning(self, message: str) -> None:
+                pass
+
+            def info(self, message: str) -> None:
+                pass
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False)
+        monkeypatch.setattr("overlay_tools.core.gh_utils.gh_require_available", lambda: None)
+        monkeypatch.setattr(
+            "overlay_tools.core.gh_utils.gh_find_open_update_pr_for_package",
+            lambda repo_root, category, name, base: None,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_branch_exists",
+            lambda branch, repo_root, remote=False: remote,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_fetch_branch",
+            lambda repo_root, branch: calls.append(("fetch", branch, None)) and False,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_reset_branch",
+            lambda branch, repo_root, start_point: calls.append(("reset", branch, start_point)),
+        )
+
+        with pytest.raises(RuntimeError, match=f"Failed to fetch origin/{context.base_branch}.*{context.feature_branch}"):
+            prepare_pr_branch(Log(), plan)
+
+        assert ("fetch", context.base_branch, None) in calls
+        assert not any(call[0] == "reset" for call in calls)
+
     def test_prepare_pr_branch_reuses_remote_branch_with_open_pr(self, monkeypatch, tmp_path: Path):
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
