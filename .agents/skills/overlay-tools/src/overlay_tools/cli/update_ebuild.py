@@ -22,6 +22,7 @@ from overlay_tools.core.git_utils import (
     git_has_changes,
     git_has_staged_changes,
     git_push,
+    git_reset_branch,
     git_root,
     is_git_repo,
 )
@@ -367,9 +368,21 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
         log.warning(f"Could not check for existing PRs: {exc}")
         log.info("Will create new PR if none exists for this branch")
 
+    local_exists = git_branch_exists(feature_branch, plan.context.repo_root)
     remote_exists = git_branch_exists(feature_branch, plan.context.repo_root, remote=True)
 
-    if git_branch_exists(feature_branch, plan.context.repo_root):
+    if existing_pr_ref is None and (local_exists or remote_exists):
+        git_fetch_branch(plan.context.repo_root, plan.context.base_branch)
+        log.step(
+            "branch",
+            f"reset stale {feature_branch} from origin/{plan.context.base_branch}",
+        )
+        git_reset_branch(
+            feature_branch,
+            plan.context.repo_root,
+            f"origin/{plan.context.base_branch}",
+        )
+    elif local_exists:
         if remote_exists:
             git_fetch_branch(plan.context.repo_root, feature_branch)
         log.step("branch", f"checkout existing {feature_branch}")

@@ -140,6 +140,11 @@ def git_checkout_branch(
     run(cmd, cwd=repo_root, check=True)
 
 
+def git_reset_branch(branch: str, repo_root: Path, start_point: str) -> None:
+    """Create or reset a local branch to start_point and check it out."""
+    run(["git", "checkout", "-B", branch, start_point], cwd=repo_root, check=True)
+
+
 def git_branch_exists(branch: str, repo_root: Path, *, remote: bool = False) -> bool:
     if remote:
         result = run(

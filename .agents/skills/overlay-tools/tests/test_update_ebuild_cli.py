@@ -18,6 +18,7 @@ from overlay_tools.cli.update_ebuild import (
     update_manifest_and_cache,
 )
 from overlay_tools.core.ebuilds import EbuildName
+from overlay_tools.core.gh_utils import PullRequestRef
 from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuild_to_drop
 
 
@@ -217,14 +218,14 @@ class TestCommitFlowHelpers:
         with pytest.raises(RuntimeError, match="Working tree has uncommitted changes"):
             prepare_pr_branch(Log(), plan)
 
-    def test_prepare_pr_branch_fetches_existing_remote_branch(self, monkeypatch, tmp_path: Path):
+    def test_prepare_pr_branch_resets_stale_remote_branch_without_open_pr(self, monkeypatch, tmp_path: Path):
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str | None]] = []
 
         class Log:
             def step(self, label: str, message: str) -> None:
-                calls.append((label, message))
+                calls.append((label, message, None))
 
             def warning(self, message: str) -> None:
                 pass
@@ -240,11 +241,67 @@ class TestCommitFlowHelpers:
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_branch_exists",
-            lambda branch, repo_root, remote=False: True,
+            lambda branch, repo_root, remote=False: remote,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_fetch_branch",
+            lambda repo_root, branch: calls.append(("fetch", branch, None)) or True,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_reset_branch",
+            lambda branch, repo_root, start_point: calls.append(("reset", branch, start_point)),
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_checkout_branch",
+            lambda branch, repo_root, create=False, start_point=None, track_remote=False: calls.append(("checkout", branch, start_point)),
+        )
+
+        feature_branch, existing_pr = prepare_pr_branch(Log(), plan)
+
+        assert feature_branch == context.feature_branch
+        assert existing_pr is None
+        assert ("fetch", context.base_branch, None) in calls
+        assert ("reset", context.feature_branch, f"origin/{context.base_branch}") in calls
+        assert not any(call[0] == "checkout" for call in calls)
+
+    def test_prepare_pr_branch_reuses_remote_branch_with_open_pr(self, monkeypatch, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        calls: list[tuple[str, str]] = []
+        pr_ref = PullRequestRef(
+            number=42,
+            url="https://github.com/example/repo/pull/42",
+            state="OPEN",
+            head_ref=context.feature_branch,
+        )
+
+        class Log:
+            def step(self, label: str, message: str) -> None:
+                calls.append((label, message))
+
+            def warning(self, message: str) -> None:
+                pass
+
+            def info(self, message: str) -> None:
+                pass
+
+        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False)
+        monkeypatch.setattr("overlay_tools.core.gh_utils.gh_require_available", lambda: None)
+        monkeypatch.setattr(
+            "overlay_tools.core.gh_utils.gh_find_open_update_pr_for_package",
+            lambda repo_root, category, name, base: pr_ref,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_branch_exists",
+            lambda branch, repo_root, remote=False: remote,
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_fetch_branch",
             lambda repo_root, branch: calls.append(("fetch", branch)) or True,
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_reset_branch",
+            lambda branch, repo_root, start_point: calls.append(("reset", branch)),
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_checkout_branch",
@@ -254,9 +311,9 @@ class TestCommitFlowHelpers:
         feature_branch, existing_pr = prepare_pr_branch(Log(), plan)
 
         assert feature_branch == context.feature_branch
-        assert existing_pr is None
-        assert ("fetch", context.feature_branch) in calls
+        assert existing_pr == pr_ref
         assert ("checkout", context.feature_branch) in calls
+        assert not any(call[0] == "reset" for call in calls)
 
     def test_collect_paths_to_stage_skips_missing_deleted_cache(self, tmp_path: Path):
         context = make_context(tmp_path)
