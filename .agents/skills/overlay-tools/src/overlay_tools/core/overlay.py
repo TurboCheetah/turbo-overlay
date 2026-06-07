@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cmp_to_key
+import os
 from pathlib import Path
 
 from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, select_latest_ebuild
 from overlay_tools.core.versions import compare_versions
+
+
+KEEP_VERSIONS_ENV_VAR = "OVERLAY_TOOLS_KEEP_VERSIONS"
+DEFAULT_KEEP_VERSIONS = 3
 
 
 SKIP_DIRS = frozenset(
@@ -81,9 +87,45 @@ def metadata_cache_path(repo_root: Path, category: str, name: str, version: str)
     return repo_root / "metadata" / "md5-cache" / category / f"{name}-{version}"
 
 
-def select_ebuild_to_drop(ebuilds: list[EbuildName], *, min_to_keep: int = 4) -> EbuildName | None:
-    non_live_ebuilds = [ebuild for ebuild in ebuilds if "9999" not in ebuild.pv]
-    if len(non_live_ebuilds) < min_to_keep:
-        return None
+def retention_count_from_env(env: Mapping[str, str] | None = None) -> int:
+    env = os.environ if env is None else env
+    raw_value = env.get(KEEP_VERSIONS_ENV_VAR)
+    if raw_value is None or raw_value == "":
+        return DEFAULT_KEEP_VERSIONS
 
-    return min(non_live_ebuilds, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv)))
+    try:
+        keep_versions = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{KEEP_VERSIONS_ENV_VAR} must be a positive integer") from exc
+
+    if keep_versions < 1:
+        raise ValueError(f"{KEEP_VERSIONS_ENV_VAR} must be a positive integer")
+
+    return keep_versions
+
+
+def select_ebuilds_to_drop(
+    ebuilds: list[EbuildName], *, keep_versions: int | None = None, versions_to_add: int = 1
+) -> tuple[EbuildName, ...]:
+    keep_versions = retention_count_from_env() if keep_versions is None else keep_versions
+    if keep_versions < 1:
+        raise ValueError("keep_versions must be a positive integer")
+    if versions_to_add < 0:
+        raise ValueError("versions_to_add must be zero or greater")
+
+    non_live_ebuilds = [ebuild for ebuild in ebuilds if "9999" not in ebuild.pv]
+    drop_count = len(non_live_ebuilds) + versions_to_add - keep_versions
+    if drop_count <= 0:
+        return ()
+
+    sorted_ebuilds = sorted(
+        non_live_ebuilds, key=cmp_to_key(lambda a, b: compare_versions(a.pv, b.pv))
+    )
+    return tuple(sorted_ebuilds[:drop_count])
+
+
+def select_ebuild_to_drop(
+    ebuilds: list[EbuildName], *, keep_versions: int | None = None
+) -> EbuildName | None:
+    drop_ebuilds = select_ebuilds_to_drop(ebuilds, keep_versions=keep_versions)
+    return drop_ebuilds[0] if drop_ebuilds else None

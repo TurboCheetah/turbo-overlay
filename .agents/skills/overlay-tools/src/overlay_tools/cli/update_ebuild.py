@@ -27,7 +27,7 @@ from overlay_tools.core.git_utils import (
     is_git_repo,
 )
 from overlay_tools.core.logging import Logger, set_logger
-from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuild_to_drop
+from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuilds_to_drop
 from overlay_tools.core.subprocess_utils import run_ebuild_manifest, run_egencache_update
 from overlay_tools.core.versions import normalize_gentoo_version
 
@@ -54,15 +54,31 @@ class UpdatePlan:
     new_path: Path
     repo_name: str | None
     new_cache_path: Path
-    drop_ebuild: EbuildName | None
-    drop_cache_path: Path | None
+    drop_ebuilds: tuple[EbuildName, ...]
+    drop_cache_paths: tuple[Path, ...]
     commit_message: str
+
+    @property
+    def drop_ebuild(self) -> EbuildName | None:
+        return self.drop_ebuilds[0] if self.drop_ebuilds else None
+
+    @property
+    def drop_cache_path(self) -> Path | None:
+        return self.drop_cache_paths[0] if self.drop_cache_paths else None
 
 
 @dataclass(frozen=True)
 class AppliedChanges:
-    deleted_ebuild_path: Path | None
-    deleted_cache_path: Path | None
+    deleted_ebuild_paths: tuple[Path, ...]
+    deleted_cache_paths: tuple[Path, ...]
+
+    @property
+    def deleted_ebuild_path(self) -> Path | None:
+        return self.deleted_ebuild_paths[0] if self.deleted_ebuild_paths else None
+
+    @property
+    def deleted_cache_path(self) -> Path | None:
+        return self.deleted_cache_paths[0] if self.deleted_cache_paths else None
 
 
 @dataclass(frozen=True)
@@ -212,19 +228,21 @@ def build_update_plan(
     new_filename = f"{context.latest.pn}-{normalized_version}.ebuild"
     new_path = context.pkg_path / new_filename
     repo_name = read_repo_name(context.repo_root)
-    drop_ebuild = None if keep_old else select_ebuild_to_drop(context.ebuilds)
-    drop_cache_path = None
-    if drop_ebuild:
-        drop_cache_path = metadata_cache_path(
+    drop_ebuilds = () if keep_old else select_ebuilds_to_drop(context.ebuilds)
+    drop_cache_paths = tuple(
+        metadata_cache_path(
             context.repo_root,
             context.category,
             context.name,
             drop_ebuild.pv,
         )
+        for drop_ebuild in drop_ebuilds
+    )
 
     commit_message = f"{context.category}/{context.name}: add {normalized_version}"
-    if drop_ebuild:
-        commit_message += f", drop {drop_ebuild.pv}"
+    if drop_ebuilds:
+        dropped_versions = ", ".join(drop_ebuild.pv for drop_ebuild in drop_ebuilds)
+        commit_message += f", drop {dropped_versions}"
 
     return UpdatePlan(
         context=context,
@@ -238,8 +256,8 @@ def build_update_plan(
             context.name,
             normalized_version,
         ),
-        drop_ebuild=drop_ebuild,
-        drop_cache_path=drop_cache_path,
+        drop_ebuilds=drop_ebuilds,
+        drop_cache_paths=drop_cache_paths,
         commit_message=commit_message,
     )
 
@@ -301,16 +319,17 @@ def render_dry_run(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> i
     if args.my_pv:
         log.step("MY_PV", f'update to "{args.my_pv}"')
 
-    if plan.drop_ebuild:
-        log.step("drop", plan.drop_ebuild.path.name)
-    else:
+    for drop_ebuild in plan.drop_ebuilds:
+        log.step("drop", drop_ebuild.path.name)
+    if not plan.drop_ebuilds:
         log.step("drop", "none; retain existing versions")
 
     log.step("manifest", "skip" if args.skip_manifest else "update")
     if plan.repo_name:
         log.step("cache", "update metadata/md5-cache")
-        if plan.drop_cache_path and plan.drop_cache_path.exists():
-            log.step("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root)))
+        for drop_cache_path in plan.drop_cache_paths:
+            if drop_cache_path.exists():
+                log.step("cache-rm", str(drop_cache_path.relative_to(plan.context.repo_root)))
     else:
         log.step("cache", "skip metadata/md5-cache update (repo name unavailable)")
 
@@ -415,23 +434,23 @@ def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan)
         else:
             log.warning("MY_PV not found in ebuild - variable not updated")
 
-    deleted_oldest = None
-    deleted_cache_path = None
-    if plan.drop_ebuild:
-        if plan.drop_ebuild.path.exists():
-            log.step("drop", plan.drop_ebuild.path.name)
-            plan.drop_ebuild.path.unlink()
-            deleted_oldest = plan.drop_ebuild.path
-            if plan.drop_cache_path and plan.drop_cache_path.exists():
-                log.step("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root)))
-                plan.drop_cache_path.unlink()
-                deleted_cache_path = plan.drop_cache_path
+    deleted_ebuild_paths: list[Path] = []
+    deleted_cache_paths: list[Path] = []
+    for drop_ebuild, drop_cache_path in zip(plan.drop_ebuilds, plan.drop_cache_paths, strict=True):
+        if drop_ebuild.path.exists():
+            log.step("drop", drop_ebuild.path.name)
+            drop_ebuild.path.unlink()
+            deleted_ebuild_paths.append(drop_ebuild.path)
+            if drop_cache_path.exists():
+                log.step("cache-rm", str(drop_cache_path.relative_to(plan.context.repo_root)))
+                drop_cache_path.unlink()
+                deleted_cache_paths.append(drop_cache_path)
         else:
-            log.info(f"Skipping drop of {plan.drop_ebuild.path.name} (already removed)")
+            log.info(f"Skipping drop of {drop_ebuild.path.name} (already removed)")
 
     return AppliedChanges(
-        deleted_ebuild_path=deleted_oldest,
-        deleted_cache_path=deleted_cache_path,
+        deleted_ebuild_paths=tuple(deleted_ebuild_paths),
+        deleted_cache_paths=tuple(deleted_cache_paths),
     )
 
 
@@ -501,10 +520,10 @@ def collect_paths_to_stage(
         for cache_path in sorted(cache_dir.glob(f"{plan.context.name}-*")):
             if cache_path not in paths_to_add:
                 paths_to_add.append(cache_path)
-    if applied_changes.deleted_ebuild_path:
-        paths_to_add.append(applied_changes.deleted_ebuild_path)
-    if applied_changes.deleted_cache_path:
-        paths_to_add.append(applied_changes.deleted_cache_path)
+    for deleted_ebuild_path in applied_changes.deleted_ebuild_paths:
+        paths_to_add.append(deleted_ebuild_path)
+    for deleted_cache_path in applied_changes.deleted_cache_paths:
+        paths_to_add.append(deleted_cache_path)
     return paths_to_add
 
 
@@ -572,7 +591,7 @@ def create_or_update_pr(
         new_version=plan.normalized_version,
         my_pv=args.my_pv,
         upstream_url=args.upstream_url,
-        dropped_version=plan.drop_ebuild.pv if plan.drop_ebuild else None,
+        dropped_version=", ".join(drop_ebuild.pv for drop_ebuild in plan.drop_ebuilds) or None,
     )
 
     if existing_pr_ref:
@@ -686,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         # Recompute commit message from actual changes (drop may have been
         # skipped if it was already done in a prior run on this branch)
         commit_msg = plan.commit_message
-        if plan.drop_ebuild and applied_changes.deleted_ebuild_path is None:
+        if plan.drop_ebuilds and not applied_changes.deleted_ebuild_paths:
             commit_msg = f"{plan.context.category}/{plan.context.name}: add {plan.normalized_version}"
 
         commit_changes(log, plan, paths_to_add, message=commit_msg)

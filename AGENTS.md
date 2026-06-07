@@ -22,8 +22,9 @@ Categories: games-util (vkbasalt), media-video (hayase-bin, lossless-cut), net-i
 # QA validation (entire overlay)
 pkgcheck scan .
 
-# QA validation (specific package)
-pkgcheck scan category/package
+# QA validation (specific package; checks latest version per slot to avoid
+# intentional retention warnings for older rollback versions)
+pkgcheck scan -f latest category/package
 
 # Update Manifest checksums
 ebuild category/package-name-version.ebuild manifest
@@ -451,15 +452,15 @@ turbo-overlay/
 4. Add `metadata.xml` with maintainer info
 5. Add `files/` subdirectory for assets
 6. Run `ebuild path/to/ebuild manifest`
-7. Test with `pkgcheck scan category/package-name`
+7. Test with `pkgcheck scan -f latest category/package-name`
 
 ### Common Commands
 ```bash
 # Manifest update
 ebuild path/to/ebuild manifest
 
-# QA scan
-pkgcheck scan .
+# QA scan current package
+pkgcheck scan -f latest category/package
 
 # Install test
 emerge -1v package-name
