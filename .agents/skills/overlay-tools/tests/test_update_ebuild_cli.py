@@ -10,6 +10,7 @@ from overlay_tools.cli.update_ebuild import (
     UpdateContext,
     build_update_plan,
     commit_changes,
+    commit_message_for_applied_changes,
     collect_paths_to_stage,
     main,
     prepare_pr_branch,
@@ -19,7 +20,12 @@ from overlay_tools.cli.update_ebuild import (
 )
 from overlay_tools.core.ebuilds import EbuildName
 from overlay_tools.core.gh_utils import PullRequestRef
-from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuild_to_drop
+from overlay_tools.core.overlay import (
+    metadata_cache_path,
+    read_repo_name,
+    select_ebuild_to_drop,
+    select_ebuilds_to_drop,
+)
 
 
 class TestReadRepoName:
@@ -42,7 +48,43 @@ class TestMetadataCachePath:
 
 
 class TestRetentionPolicy:
-    def test_keeps_all_versions_when_fewer_than_four_non_live(self):
+    def test_keeps_all_versions_when_fewer_than_three_non_live(self, monkeypatch):
+        monkeypatch.delenv("OVERLAY_TOOLS_KEEP_VERSIONS", raising=False)
+        ebuilds = [
+            EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild")),
+            EbuildName("pkg", "1.1.0", Path("pkg-1.1.0.ebuild")),
+        ]
+
+        assert select_ebuild_to_drop(ebuilds) is None
+
+    def test_drops_oldest_when_three_non_live_versions_exist(self, monkeypatch):
+        monkeypatch.delenv("OVERLAY_TOOLS_KEEP_VERSIONS", raising=False)
+        ebuilds = [
+            EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild")),
+            EbuildName("pkg", "1.1.0", Path("pkg-1.1.0.ebuild")),
+            EbuildName("pkg", "1.2.0", Path("pkg-1.2.0.ebuild")),
+        ]
+
+        dropped = select_ebuild_to_drop(ebuilds)
+
+        assert dropped is not None
+        assert dropped.pv == "1.0.0"
+
+    def test_drops_enough_old_versions_to_keep_three_after_add(self, monkeypatch):
+        monkeypatch.delenv("OVERLAY_TOOLS_KEEP_VERSIONS", raising=False)
+        ebuilds = [
+            EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild")),
+            EbuildName("pkg", "1.1.0", Path("pkg-1.1.0.ebuild")),
+            EbuildName("pkg", "1.2.0", Path("pkg-1.2.0.ebuild")),
+            EbuildName("pkg", "1.3.0", Path("pkg-1.3.0.ebuild")),
+        ]
+
+        dropped = select_ebuilds_to_drop(ebuilds)
+
+        assert [ebuild.pv for ebuild in dropped] == ["1.0.0", "1.1.0"]
+
+    def test_env_var_overrides_retention_count(self, monkeypatch):
+        monkeypatch.setenv("OVERLAY_TOOLS_KEEP_VERSIONS", "4")
         ebuilds = [
             EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild")),
             EbuildName("pkg", "1.1.0", Path("pkg-1.1.0.ebuild")),
@@ -51,24 +93,18 @@ class TestRetentionPolicy:
 
         assert select_ebuild_to_drop(ebuilds) is None
 
-    def test_drops_oldest_when_four_non_live_versions_exist(self):
+    def test_rejects_invalid_retention_env_var(self, monkeypatch):
+        monkeypatch.setenv("OVERLAY_TOOLS_KEEP_VERSIONS", "0")
+        ebuilds = [EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild"))]
+
+        with pytest.raises(ValueError, match="OVERLAY_TOOLS_KEEP_VERSIONS"):
+            select_ebuild_to_drop(ebuilds)
+
+    def test_ignores_live_ebuild_for_drop_threshold(self, monkeypatch):
+        monkeypatch.delenv("OVERLAY_TOOLS_KEEP_VERSIONS", raising=False)
         ebuilds = [
             EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild")),
             EbuildName("pkg", "1.1.0", Path("pkg-1.1.0.ebuild")),
-            EbuildName("pkg", "1.2.0", Path("pkg-1.2.0.ebuild")),
-            EbuildName("pkg", "1.3.0", Path("pkg-1.3.0.ebuild")),
-        ]
-
-        dropped = select_ebuild_to_drop(ebuilds)
-
-        assert dropped is not None
-        assert dropped.pv == "1.0.0"
-
-    def test_ignores_live_ebuild_for_drop_threshold(self):
-        ebuilds = [
-            EbuildName("pkg", "1.0.0", Path("pkg-1.0.0.ebuild")),
-            EbuildName("pkg", "1.1.0", Path("pkg-1.1.0.ebuild")),
-            EbuildName("pkg", "1.2.0", Path("pkg-1.2.0.ebuild")),
             EbuildName("pkg", "9999", Path("pkg-9999.ebuild")),
         ]
 
@@ -98,8 +134,8 @@ class TestBuildUpdatePlan:
         plan = build_update_plan(context, "6.4.57", keep_old=False)
 
         assert plan.drop_ebuild is not None
-        assert plan.drop_ebuild.pv == "6.4.53"
-        assert plan.commit_message == "media-video/hayase-bin: add 6.4.57, drop 6.4.53"
+        assert [ebuild.pv for ebuild in plan.drop_ebuilds] == ["6.4.53", "6.4.54"]
+        assert plan.commit_message == "media-video/hayase-bin: add 6.4.57, drop 6.4.53, 6.4.54"
 
     def test_keep_old_disables_drop(self, tmp_path: Path):
         context = UpdateContext(
@@ -124,6 +160,30 @@ class TestBuildUpdatePlan:
 
         assert plan.drop_ebuild is None
         assert plan.commit_message == "media-video/hayase-bin: add 6.4.57"
+
+    def test_commit_message_uses_actual_deleted_paths(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        applied_changes = AppliedChanges(
+            deleted_ebuild_paths=(plan.drop_ebuilds[0].path,),
+            deleted_cache_paths=(),
+        )
+
+        assert (
+            commit_message_for_applied_changes(plan, applied_changes)
+            == "dev-util/t3code-bin: add 0.0.11, drop 0.0.4"
+        )
+
+    def test_commit_message_skips_drop_when_no_deleted_paths(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+
+        assert (
+            commit_message_for_applied_changes(
+                plan, AppliedChanges(deleted_ebuild_paths=(), deleted_cache_paths=())
+            )
+            == "dev-util/t3code-bin: add 0.0.11"
+        )
 
 
 def make_context(tmp_path: Path) -> UpdateContext:
@@ -365,8 +425,8 @@ class TestCommitFlowHelpers:
         paths = collect_paths_to_stage(
             plan,
             AppliedChanges(
-                deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
-                deleted_cache_path=None,
+                deleted_ebuild_paths=tuple(ebuild.path for ebuild in plan.drop_ebuilds),
+                deleted_cache_paths=(),
             ),
             RefreshedArtifacts(paths=(manifest_path,)),
         )
@@ -374,7 +434,7 @@ class TestCommitFlowHelpers:
         assert paths == [
             plan.new_path,
             manifest_path,
-            plan.drop_ebuild.path,
+            *(ebuild.path for ebuild in plan.drop_ebuilds),
         ]
         assert plan.drop_cache_path not in paths
 
@@ -390,8 +450,8 @@ class TestCommitFlowHelpers:
         paths = collect_paths_to_stage(
             plan,
             AppliedChanges(
-                deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
-                deleted_cache_path=plan.drop_cache_path,
+                deleted_ebuild_paths=tuple(ebuild.path for ebuild in plan.drop_ebuilds),
+                deleted_cache_paths=plan.drop_cache_paths,
             ),
             RefreshedArtifacts(paths=(manifest_path, plan.new_cache_path)),
         )
@@ -400,8 +460,8 @@ class TestCommitFlowHelpers:
             plan.new_path,
             manifest_path,
             plan.new_cache_path,
-            plan.drop_ebuild.path,
-            plan.drop_cache_path,
+            *(ebuild.path for ebuild in plan.drop_ebuilds),
+            *plan.drop_cache_paths,
         ]
 
     def test_collect_paths_to_stage_includes_package_cache_siblings(self, tmp_path: Path):
@@ -416,7 +476,7 @@ class TestCommitFlowHelpers:
 
         paths = collect_paths_to_stage(
             plan,
-            AppliedChanges(deleted_ebuild_path=None, deleted_cache_path=None),
+            AppliedChanges(deleted_ebuild_paths=(), deleted_cache_paths=()),
             RefreshedArtifacts(paths=(manifest_path, plan.new_cache_path)),
         )
 
@@ -439,15 +499,15 @@ class TestCommitFlowHelpers:
         paths = collect_paths_to_stage(
             plan,
             AppliedChanges(
-                deleted_ebuild_path=plan.drop_ebuild.path if plan.drop_ebuild else None,
-                deleted_cache_path=None,
+                deleted_ebuild_paths=tuple(ebuild.path for ebuild in plan.drop_ebuilds),
+                deleted_cache_paths=(),
             ),
             RefreshedArtifacts(paths=()),
         )
 
         assert paths == [
             plan.new_path,
-            plan.drop_ebuild.path,
+            *(ebuild.path for ebuild in plan.drop_ebuilds),
         ]
         assert manifest_path not in paths
         assert plan.new_cache_path not in paths
