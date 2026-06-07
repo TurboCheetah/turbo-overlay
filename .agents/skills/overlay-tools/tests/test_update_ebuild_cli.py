@@ -10,6 +10,7 @@ from overlay_tools.cli.update_ebuild import (
     UpdateContext,
     build_update_plan,
     commit_changes,
+    commit_message_for_applied_changes,
     collect_paths_to_stage,
     main,
     prepare_pr_branch,
@@ -159,6 +160,30 @@ class TestBuildUpdatePlan:
 
         assert plan.drop_ebuild is None
         assert plan.commit_message == "media-video/hayase-bin: add 6.4.57"
+
+    def test_commit_message_uses_actual_deleted_paths(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+        applied_changes = AppliedChanges(
+            deleted_ebuild_paths=(plan.drop_ebuilds[0].path,),
+            deleted_cache_paths=(),
+        )
+
+        assert (
+            commit_message_for_applied_changes(plan, applied_changes)
+            == "dev-util/t3code-bin: add 0.0.11, drop 0.0.4"
+        )
+
+    def test_commit_message_skips_drop_when_no_deleted_paths(self, tmp_path: Path):
+        context = make_context(tmp_path)
+        plan = build_update_plan(context, "0.0.11", keep_old=False)
+
+        assert (
+            commit_message_for_applied_changes(
+                plan, AppliedChanges(deleted_ebuild_paths=(), deleted_cache_paths=())
+            )
+            == "dev-util/t3code-bin: add 0.0.11"
+        )
 
 
 def make_context(tmp_path: Path) -> UpdateContext:

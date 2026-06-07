@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
 
-from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, select_latest_ebuild, update_ebuild_var
+from overlay_tools.core.ebuilds import (
+    EbuildName,
+    find_ebuilds,
+    parse_ebuild_filename,
+    select_latest_ebuild,
+    update_ebuild_var,
+)
 from overlay_tools.core.errors import ExternalToolMissingError, VersionError
 from overlay_tools.core.git_utils import (
     format_git_error,
@@ -424,6 +430,14 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
     return feature_branch, existing_pr_ref
 
 
+def commit_message_for_applied_changes(plan: UpdatePlan, applied_changes: AppliedChanges) -> str:
+    commit_message = f"{plan.context.category}/{plan.context.name}: add {plan.normalized_version}"
+    dropped_versions = [parse_ebuild_filename(path).pv for path in applied_changes.deleted_ebuild_paths]
+    if dropped_versions:
+        commit_message += f", drop {', '.join(dropped_versions)}"
+    return commit_message
+
+
 def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> AppliedChanges:
     log.step("copy", f"{plan.context.latest.path.name} → {plan.new_filename}")
     shutil.copy2(plan.context.latest.path, plan.new_path)
@@ -702,11 +716,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         paths_to_add = collect_paths_to_stage(plan, applied_changes, refreshed_artifacts)
 
-        # Recompute commit message from actual changes (drop may have been
-        # skipped if it was already done in a prior run on this branch)
-        commit_msg = plan.commit_message
-        if plan.drop_ebuilds and not applied_changes.deleted_ebuild_paths:
-            commit_msg = f"{plan.context.category}/{plan.context.name}: add {plan.normalized_version}"
+        commit_msg = commit_message_for_applied_changes(plan, applied_changes)
 
         commit_changes(log, plan, paths_to_add, message=commit_msg)
 
