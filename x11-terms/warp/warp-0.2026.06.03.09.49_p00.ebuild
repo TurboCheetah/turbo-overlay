@@ -5,7 +5,7 @@ EAPI=8
 
 inherit desktop xdg
 
-MY_PV="0.2026.05.06.09.13.preview_00"
+MY_PV="0.2026.06.03.09.49.stable_00"
 DESCRIPTION="The Agentic Development Environment"
 HOMEPAGE="https://www.warp.dev/ https://github.com/warpdotdev/Warp"
 SRC_URI="https://github.com/warpdotdev/Warp/archive/refs/tags/v${MY_PV}.tar.gz -> ${P}.tar.gz"
