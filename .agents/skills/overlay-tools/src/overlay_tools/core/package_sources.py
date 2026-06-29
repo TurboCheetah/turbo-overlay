@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-import requests
+import httpx
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,9 @@ def parse_hayase_latest(payload: dict[str, Any]) -> CustomReleaseInfo | None:
         match = HAYASE_LINUX_DEB_RE.match(filename)
         if not match:
             continue
-        return CustomReleaseInfo(version=match.group("version"), url=str(url))
+        if not isinstance(url, str) or not url:
+            continue
+        return CustomReleaseInfo(version=match.group("version"), url=url)
     return None
 
 
@@ -58,10 +60,10 @@ def get_custom_latest_release(custom_url: str | None) -> CustomReleaseInfo | Non
         return None
 
     try:
-        response = requests.get(custom_url, timeout=10)
+        response = httpx.get(custom_url, timeout=10)
         response.raise_for_status()
         payload = response.json()
-    except (requests.RequestException, ValueError):
+    except (httpx.HTTPError, ValueError):
         return None
 
     if not isinstance(payload, dict):

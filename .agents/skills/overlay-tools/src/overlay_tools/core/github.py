@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-import requests
+import httpx
 
 from overlay_tools.core.versions import normalize_upstream_version
 
@@ -61,7 +61,7 @@ class GitHubClient:
     def __init__(self, token: str | None = None, cache_dir: Path | None = None):
         self.token = token
         self.cache_dir = cache_dir
-        self.session = requests.Session()
+        self.session = httpx.Client()
         self.session.headers["Accept"] = "application/vnd.github.v3+json"
         self.session.headers["User-Agent"] = "overlay-tools/0.1"
         if token:
@@ -147,7 +147,7 @@ class GitHubClient:
             self._write_cache(repo, info)
             return info
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             raise GitHubAPIError(f"API error for {repo}: {e}") from e
         except ValueError as e:
             raise GitHubAPIError(f"Invalid JSON response for {repo}: {e}") from e
@@ -185,7 +185,7 @@ class GitHubClient:
 
             return None
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             raise GitHubAPIError(f"API error for {repo}: {e}") from e
         except ValueError as e:
             raise GitHubAPIError(f"Invalid JSON response for {repo}: {e}") from e
@@ -205,7 +205,7 @@ class GitHubClient:
                 version=normalize_upstream_version(tag),
                 url=f"https://github.com/{repo}/releases/tag/{tag}",
             )
-        except (requests.RequestException, ValueError):
+        except (httpx.HTTPError, ValueError):
             return None
 
     def get_rate_limit(self) -> dict:
@@ -213,7 +213,7 @@ class GitHubClient:
             response = self.session.get(f"{self.API_BASE}/rate_limit", timeout=5)
             response.raise_for_status()
             return response.json().get("rate", {})
-        except (requests.RequestException, ValueError):
+        except (httpx.HTTPError, ValueError):
             return {}
 
 

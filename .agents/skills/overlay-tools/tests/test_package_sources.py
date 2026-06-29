@@ -16,6 +16,14 @@ class TestHayaseLatest:
         assert release.version == "6.4.79"
         assert release.url == "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb"
 
+    def test_skips_missing_linux_deb_url(self):
+        payload = {
+            "linux-hayase-6.4.79-linux.deb": None,
+            "linux-hayase-6.4.78-linux.deb": "",
+        }
+
+        assert parse_hayase_latest(payload) is None
+
 
 class TestGetCustomUrl:
     def test_matches_host_from_src_uri(self):
