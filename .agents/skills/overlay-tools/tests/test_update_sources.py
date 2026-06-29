@@ -85,6 +85,17 @@ class TestHayaseUpdateSource:
         assert match is not None
         assert match.source_url == HAYASE_API_URL
 
+    def test_does_not_match_hayase_token_outside_hostname(self):
+        source = HayaseUpdateSource()
+        context = PackageSourceContext(
+            category="media-video",
+            name="not-obvious",
+            src_uri="https://example.invalid/download?mirror=hayase.watch",
+            homepage="https://not-hayase.watch.example/",
+        )
+
+        assert source.match(context) is None
+
     def test_matches_vendor_name_fallback_without_substring_false_positive(self):
         source = HayaseUpdateSource()
         hayase = PackageSourceContext("media-video", "hayase-bin", None, None)
@@ -105,6 +116,19 @@ class TestHayaseUpdateSource:
         assert release is not None
         assert release.version == "6.4.79"
         assert release.url == "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb"
+
+    def test_parse_latest_returns_highest_linux_deb_version(self):
+        payload = {
+            "linux-hayase-6.4.79-linux.deb": "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb",
+            "linux-hayase-6.4.80-linux.deb": "https://api.hayase.watch/files/linux-hayase-6.4.80-linux.deb",
+        }
+
+        release = parse_latest(payload)
+
+        assert release == SourceRelease(
+            version="6.4.80",
+            url="https://api.hayase.watch/files/linux-hayase-6.4.80-linux.deb",
+        )
 
     def test_parse_latest_skips_missing_linux_deb_url(self):
         payload = {
@@ -130,15 +154,15 @@ class TestHayaseUpdateSource:
                     )
                 }
 
-        def fake_get(url: str, *, timeout: int):
-            calls.append((url, timeout))
+        def fake_get(url: str, *, timeout: int, follow_redirects: bool):
+            calls.append((url, timeout, follow_redirects))
             return Response()
 
         monkeypatch.setattr(hayase_module.httpx, "get", fake_get)
 
         release = source.latest_release(match)
 
-        assert calls == [(HAYASE_API_URL, 10)]
+        assert calls == [(HAYASE_API_URL, 10, True)]
         assert release == SourceRelease(
             version="6.4.79",
             url="https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb",
@@ -148,7 +172,7 @@ class TestHayaseUpdateSource:
         source = HayaseUpdateSource()
         match = SourceMatch(source_name="hayase", source_url=HAYASE_API_URL)
 
-        def fake_get(url: str, *, timeout: int):
+        def fake_get(url: str, *, timeout: int, follow_redirects: bool):
             raise httpx.HTTPError("boom")
 
         monkeypatch.setattr(hayase_module.httpx, "get", fake_get)
@@ -166,7 +190,11 @@ class TestHayaseUpdateSource:
             def json(self):
                 raise ValueError("not json")
 
-        monkeypatch.setattr(hayase_module.httpx, "get", lambda url, *, timeout: Response())
+        monkeypatch.setattr(
+            hayase_module.httpx,
+            "get",
+            lambda url, *, timeout, follow_redirects: Response(),
+        )
 
         assert source.latest_release(match) is None
 
@@ -181,7 +209,11 @@ class TestHayaseUpdateSource:
             def json(self):
                 return ["not", "a", "dict"]
 
-        monkeypatch.setattr(hayase_module.httpx, "get", lambda url, *, timeout: Response())
+        monkeypatch.setattr(
+            hayase_module.httpx,
+            "get",
+            lambda url, *, timeout, follow_redirects: Response(),
+        )
 
         assert source.latest_release(match) is None
 
@@ -201,6 +233,7 @@ class TestWarpUpdateSource:
         assert match is not None
         assert match.source_name == "warp"
         assert match.source_url == WARP_CHANGELOG_URL
+        assert match.fallback_to_github is True
 
     def test_matches_vendor_name_fallback_without_substring_false_positive(self):
         source = WarpUpdateSource()

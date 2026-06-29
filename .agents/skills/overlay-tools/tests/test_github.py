@@ -1,13 +1,27 @@
 import json
 
+import httpx
+
 from overlay_tools.core.github import GitHubClient
 
 
 class TestGitHubClient:
     def test_http_client_follows_redirects(self):
-        client = GitHubClient()
+        requests: list[str] = []
 
-        assert client.session.follow_redirects is True
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            if str(request.url) == "https://api.github.test/start":
+                return httpx.Response(302, headers={"Location": "https://api.github.test/final"})
+            return httpx.Response(200, json={"ok": True})
+
+        client = GitHubClient()
+        client.session = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+        response = client.session.get("https://api.github.test/start")
+
+        assert response.json() == {"ok": True}
+        assert requests == ["https://api.github.test/start", "https://api.github.test/final"]
 
 
 class TestGitHubClientCache:

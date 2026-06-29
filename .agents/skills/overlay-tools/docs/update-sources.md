@@ -12,10 +12,10 @@ Each plugin implements:
 - `latest_release(match: SourceMatch) -> SourceRelease | None`
 
 `latest_release()` should return `None` for non-fatal HTTP/JSON/parsing failures.
-That lets `check-updates` fall back to GitHub or `manual-check` without failing the
-whole update scan. Plugins that only provide a human-checkable upstream URL can
-also intentionally return `None`; `check-updates` will preserve that URL in the
-`manual-check` status.
+By default, a matched plugin that returns `None` reports `manual-check` with the
+plugin's `source_url`; this prevents stale metadata GitHub IDs from masking a
+custom-source failure. Manual-only plugins that should preserve GitHub release
+fallback can set `SourceMatch(fallback_to_github=True)`.
 
 ## Adding a source
 
@@ -33,11 +33,13 @@ also intentionally return `None`; `check-updates` will preserve that URL in the
 
 Use `httpx`, not `requests`.
 
-Custom source HTTP failures should be non-fatal:
+Custom source HTTP failures should be non-fatal. Use `follow_redirects=True` for
+latest-release endpoints that may return 30x responses; this mirrors
+`overlay_tools.core.github.GitHubClient` behavior.
 
 ```python
 try:
-    response = httpx.get(url, timeout=10)
+    response = httpx.get(url, timeout=10, follow_redirects=True)
     response.raise_for_status()
     payload = response.json()
 except (httpx.HTTPError, ValueError):

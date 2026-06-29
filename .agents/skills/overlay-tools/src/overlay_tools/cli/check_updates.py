@@ -86,7 +86,18 @@ def check_channel_ebuild(
     if source_match_result:
         source, source_match = source_match_result
         source_release = source.latest_release(source_match)
-        if source_release:
+        if source_release is None:
+            if not source_match.fallback_to_github:
+                return build_status(
+                    category=category,
+                    name=name,
+                    current_version=current_version,
+                    github_repo=github_repo,
+                    custom_url=source_match.source_url,
+                    status="manual-check",
+                    my_pv=my_pv,
+                )
+        else:
             cmp = compare_versions(current_version, source_release.version)
             status = "update-available" if cmp < 0 else "up-to-date"
             gentoo_version = upstream_to_gentoo(source_release.version)
