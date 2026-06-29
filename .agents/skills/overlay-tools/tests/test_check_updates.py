@@ -90,7 +90,6 @@ class TestCheckChannelEbuildUpdateSource:
             SourceMatch(source_name="fake", source_url="https://example.invalid/latest")
         ]
 
-
     def test_plugin_release_none_does_not_fall_back_to_github(self, monkeypatch, tmp_path: Path):
         pkg_path = tmp_path / "media-video" / "hayase-bin"
         pkg_path.mkdir(parents=True)

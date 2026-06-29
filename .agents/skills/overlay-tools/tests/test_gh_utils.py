@@ -229,9 +229,14 @@ class TestGhEditPr:
                 mock_run.assert_called_once()
                 cmd = mock_run.call_args[0][0]
                 assert cmd == [
-                    "gh", "pr", "edit", "42",
-                    "--title", "New Title",
-                    "--body", "New Body",
+                    "gh",
+                    "pr",
+                    "edit",
+                    "42",
+                    "--title",
+                    "New Title",
+                    "--body",
+                    "New Body",
                 ]
 
     def test_edits_only_title(self, tmp_path):

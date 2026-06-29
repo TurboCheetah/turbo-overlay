@@ -179,7 +179,9 @@ def _render_rich(packages: list[PackageStatus]) -> None:
     stats = Table.grid(padding=(0, 3))
     stats.add_column(justify="right")
     stats.add_column(justify="left")
-    stats.add_row(Text(str(summary.checked), style="bold cyan"), Text("packages checked", style="dim"))
+    stats.add_row(
+        Text(str(summary.checked), style="bold cyan"), Text("packages checked", style="dim")
+    )
 
     if summary.updates > 0:
         stats.add_row(
@@ -194,7 +196,9 @@ def _render_rich(packages: list[PackageStatus]) -> None:
         )
 
     if summary.unknown > 0:
-        stats.add_row(Text(str(summary.unknown), style="yellow"), Text("unknown status", style="dim yellow"))
+        stats.add_row(
+            Text(str(summary.unknown), style="yellow"), Text("unknown status", style="dim yellow")
+        )
 
     if summary.errors > 0:
         stats.add_row(Text(str(summary.errors), style="red"), Text("errors", style="dim red"))

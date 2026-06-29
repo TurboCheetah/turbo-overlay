@@ -74,7 +74,6 @@ class TestSummarizePackages:
         assert summary == StatusSummary(updates=1, up_to_date=1, manual=1, unknown=0, errors=1)
         assert summary.checked == 2
 
-
     def test_counts_unknown_statuses_separately(self):
         summary = summarize_packages(
             _sample_packages()
@@ -98,7 +97,10 @@ class TestSummarizePackages:
 
 class TestRenderTerminalReport:
     def test_plain_fallback_outputs_summary(self, monkeypatch, capsys):
-        monkeypatch.setattr("overlay_tools.core.report._render_rich", lambda packages: (_ for _ in ()).throw(ImportError))
+        monkeypatch.setattr(
+            "overlay_tools.core.report._render_rich",
+            lambda packages: (_ for _ in ()).throw(ImportError),
+        )
 
         render_terminal_report(_sample_packages())
         output = capsys.readouterr().out
@@ -108,7 +110,10 @@ class TestRenderTerminalReport:
         assert "1 need manual check" in output
 
     def test_plain_fallback_reports_unknown_statuses(self, monkeypatch, capsys):
-        monkeypatch.setattr("overlay_tools.core.report._render_rich", lambda packages: (_ for _ in ()).throw(ImportError))
+        monkeypatch.setattr(
+            "overlay_tools.core.report._render_rich",
+            lambda packages: (_ for _ in ()).throw(ImportError),
+        )
 
         render_terminal_report(
             _sample_packages()

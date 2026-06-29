@@ -252,7 +252,9 @@ class TestCommitFlowHelpers:
             def success(self, message: str) -> None:
                 pass
 
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None
+        )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_has_staged_changes",
             lambda repo_root: False,
@@ -273,12 +275,16 @@ class TestCommitFlowHelpers:
         class Log:
             pass
 
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: True)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: True
+        )
 
         with pytest.raises(RuntimeError, match="Working tree has uncommitted changes"):
             prepare_pr_branch(Log(), plan)
 
-    def test_prepare_pr_branch_resets_stale_remote_branch_without_open_pr(self, monkeypatch, tmp_path: Path):
+    def test_prepare_pr_branch_resets_stale_remote_branch_without_open_pr(
+        self, monkeypatch, tmp_path: Path
+    ):
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         calls: list[tuple[str, str, str | None]] = []
@@ -293,7 +299,9 @@ class TestCommitFlowHelpers:
             def info(self, message: str) -> None:
                 pass
 
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False
+        )
         monkeypatch.setattr("overlay_tools.core.gh_utils.gh_require_available", lambda: None)
         monkeypatch.setattr(
             "overlay_tools.core.gh_utils.gh_find_open_update_pr_for_package",
@@ -313,7 +321,9 @@ class TestCommitFlowHelpers:
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_checkout_branch",
-            lambda branch, repo_root, create=False, start_point=None, track_remote=False: calls.append(("checkout", branch, start_point)),
+            lambda branch, repo_root, create=False, start_point=None, track_remote=False: (
+                calls.append(("checkout", branch, start_point))
+            ),
         )
 
         feature_branch, existing_pr = prepare_pr_branch(Log(), plan)
@@ -324,7 +334,9 @@ class TestCommitFlowHelpers:
         assert ("reset", context.feature_branch, f"origin/{context.base_branch}") in calls
         assert not any(call[0] == "checkout" for call in calls)
 
-    def test_prepare_pr_branch_aborts_stale_branch_reset_when_base_fetch_fails(self, monkeypatch, tmp_path: Path):
+    def test_prepare_pr_branch_aborts_stale_branch_reset_when_base_fetch_fails(
+        self, monkeypatch, tmp_path: Path
+    ):
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         calls: list[tuple[str, str, str | None]] = []
@@ -339,7 +351,9 @@ class TestCommitFlowHelpers:
             def info(self, message: str) -> None:
                 pass
 
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False
+        )
         monkeypatch.setattr("overlay_tools.core.gh_utils.gh_require_available", lambda: None)
         monkeypatch.setattr(
             "overlay_tools.core.gh_utils.gh_find_open_update_pr_for_package",
@@ -358,7 +372,10 @@ class TestCommitFlowHelpers:
             lambda branch, repo_root, start_point: calls.append(("reset", branch, start_point)),
         )
 
-        with pytest.raises(RuntimeError, match=f"Failed to fetch origin/{context.base_branch}.*{context.feature_branch}"):
+        with pytest.raises(
+            RuntimeError,
+            match=f"Failed to fetch origin/{context.base_branch}.*{context.feature_branch}",
+        ):
             prepare_pr_branch(Log(), plan)
 
         assert ("fetch", context.base_branch, None) in calls
@@ -385,7 +402,9 @@ class TestCommitFlowHelpers:
             def info(self, message: str) -> None:
                 pass
 
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: False
+        )
         monkeypatch.setattr("overlay_tools.core.gh_utils.gh_require_available", lambda: None)
         monkeypatch.setattr(
             "overlay_tools.core.gh_utils.gh_find_open_update_pr_for_package",
@@ -405,7 +424,9 @@ class TestCommitFlowHelpers:
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_checkout_branch",
-            lambda branch, repo_root, create=False, start_point=None, track_remote=False: calls.append(("checkout", branch)),
+            lambda branch, repo_root, create=False, start_point=None, track_remote=False: (
+                calls.append(("checkout", branch))
+            ),
         )
 
         feature_branch, existing_pr = prepare_pr_branch(Log(), plan)
@@ -557,7 +578,9 @@ class TestCommitFlowHelpers:
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.run_egencache_update",
-            lambda repo_root, repo_name, atom: plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True),
+            lambda repo_root, repo_name, atom: plan.new_cache_path.parent.mkdir(
+                parents=True, exist_ok=True
+            ),
         )
         plan.new_cache_path.parent.mkdir(parents=True, exist_ok=True)
         plan.new_cache_path.write_text("", encoding="utf-8")
@@ -690,7 +713,10 @@ class TestCommitFlowHelpers:
         )
 
         assert result == 0
-        assert ("cache-rm", str(plan.drop_cache_path.relative_to(plan.context.repo_root))) not in messages
+        assert (
+            "cache-rm",
+            str(plan.drop_cache_path.relative_to(plan.context.repo_root)),
+        ) not in messages
 
 
 class TestPrGuardrails:
@@ -724,8 +750,12 @@ class TestPrGuardrails:
             lambda path: True,
         )
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "work")
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main"
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "work"
+        )
 
         result = main(
             [
@@ -749,8 +779,12 @@ class TestPrGuardrails:
 
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main"
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main"
+        )
 
         result = main(["--dry-run", "--version", "1.0.1", str(pkg_path)])
 
@@ -765,8 +799,12 @@ class TestPrGuardrails:
 
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main"
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main"
+        )
 
         result = main(["--skip-manifest", "--version", "1.0.1", str(pkg_path)])
 
@@ -779,8 +817,12 @@ class TestPrGuardrails:
 
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main"
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main"
+        )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.apply_ebuild_update",
             lambda log, args, plan: (_ for _ in ()).throw(RuntimeError("boom")),
@@ -801,23 +843,40 @@ class TestPrGuardrails:
 
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.is_git_repo", lambda path: True)
         monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_root", lambda path: tmp_path)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main")
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main")
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.run_ebuild_manifest", lambda path: (path.parent / "Manifest").write_text("", encoding="utf-8"))
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_default_branch", lambda path: "main"
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_current_branch", lambda path: "main"
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.run_ebuild_manifest",
+            lambda path: (path.parent / "Manifest").write_text("", encoding="utf-8"),
+        )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.run_egencache_update",
             lambda repo_root, repo_name, atom: (
                 (repo_root / "metadata" / "md5-cache" / "cat").mkdir(parents=True, exist_ok=True),
-                (repo_root / "metadata" / "md5-cache" / "cat" / "pkg-1.0.1").write_text("", encoding="utf-8"),
+                (repo_root / "metadata" / "md5-cache" / "cat" / "pkg-1.0.1").write_text(
+                    "", encoding="utf-8"
+                ),
             ),
         )
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_checkout_branch",
-            lambda branch, repo_root, create=False, start_point=None, track_remote=False: checkout_calls.append(branch),
+            lambda branch, repo_root, create=False, start_point=None, track_remote=False: (
+                checkout_calls.append(branch)
+            ),
         )
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_has_staged_changes", lambda repo_root: True)
-        monkeypatch.setattr("overlay_tools.cli.update_ebuild.git_commit", lambda message, repo_root: None)
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_add", lambda paths, repo_root: None
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_has_staged_changes", lambda repo_root: True
+        )
+        monkeypatch.setattr(
+            "overlay_tools.cli.update_ebuild.git_commit", lambda message, repo_root: None
+        )
 
         result = main(["-y", "--version", "1.0.1", str(pkg_path)])
 
