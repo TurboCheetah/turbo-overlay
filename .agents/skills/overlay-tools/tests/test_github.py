@@ -3,6 +3,13 @@ import json
 from overlay_tools.core.github import GitHubClient
 
 
+class TestGitHubClient:
+    def test_http_client_follows_redirects(self):
+        client = GitHubClient()
+
+        assert client.session.follow_redirects is True
+
+
 class TestGitHubClientCache:
     def test_read_cache_re_normalizes_tag(self, tmp_path):
         cache_dir = tmp_path / "cache"

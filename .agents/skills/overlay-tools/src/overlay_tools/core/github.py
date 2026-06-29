@@ -61,7 +61,7 @@ class GitHubClient:
     def __init__(self, token: str | None = None, cache_dir: Path | None = None):
         self.token = token
         self.cache_dir = cache_dir
-        self.session = httpx.Client()
+        self.session = httpx.Client(follow_redirects=True)
         self.session.headers["Accept"] = "application/vnd.github.v3+json"
         self.session.headers["User-Agent"] = "overlay-tools/0.1"
         if token:
