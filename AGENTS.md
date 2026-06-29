@@ -90,8 +90,20 @@ uv run ruff format .
 uv run ty check src
 uv run pytest -q
 
-# Run pre-commit on the whole repo (from repo root)
-pre-commit run --all-files
+# Run pre-commit on the whole repo (from repo root).
+# pre-commit is installed under .agents/skills/overlay-tools/.venv when you
+# run `uv sync --group dev`; invoke it via `uv run` so PATH resolves
+# correctly without a global pre-commit install.
+cd .agents/skills/overlay-tools && uv run pre-commit run --all-files
+# or, from the repo root, with PATH adjusted:
+#   PATH="$PWD/.agents/skills/overlay-tools/.venv/bin:$PATH" pre-commit run --all-files
+```
+
+`pre-commit install` (to enable the git hook) is also run from inside that
+venv:
+
+```bash
+cd .agents/skills/overlay-tools && uv run pre-commit install
 ```
 
 Ruff rules enabled: `E`, `F`, `I`, `UP`, `B`, `SIM` (via `extend-select` in
