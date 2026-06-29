@@ -1,3 +1,6 @@
+import httpx
+
+import overlay_tools.core.update_sources.hayase as hayase_module
 from overlay_tools.core.update_sources.base import (
     PackageSourceContext,
     SourceMatch,
@@ -8,7 +11,8 @@ from overlay_tools.core.update_sources.hayase import (
     HayaseUpdateSource,
     parse_latest,
 )
-from overlay_tools.core.update_sources.registry import find_source_match
+from overlay_tools.core.update_sources.registry import DEFAULT_UPDATE_SOURCES, find_source_match
+from overlay_tools.core.update_sources.warp import WARP_CHANGELOG_URL, WarpUpdateSource
 
 
 class DummySource:
@@ -109,3 +113,111 @@ class TestHayaseUpdateSource:
         }
 
         assert parse_latest(payload) is None
+
+    def test_latest_release_fetches_and_parses_expected_url(self, monkeypatch):
+        source = HayaseUpdateSource()
+        match = SourceMatch(source_name="hayase", source_url=HAYASE_API_URL)
+        calls = []
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "linux-hayase-6.4.79-linux.deb": (
+                        "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb"
+                    )
+                }
+
+        def fake_get(url: str, *, timeout: int):
+            calls.append((url, timeout))
+            return Response()
+
+        monkeypatch.setattr(hayase_module.httpx, "get", fake_get)
+
+        release = source.latest_release(match)
+
+        assert calls == [(HAYASE_API_URL, 10)]
+        assert release == SourceRelease(
+            version="6.4.79",
+            url="https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb",
+        )
+
+    def test_latest_release_returns_none_for_http_errors(self, monkeypatch):
+        source = HayaseUpdateSource()
+        match = SourceMatch(source_name="hayase", source_url=HAYASE_API_URL)
+
+        def fake_get(url: str, *, timeout: int):
+            raise httpx.HTTPError("boom")
+
+        monkeypatch.setattr(hayase_module.httpx, "get", fake_get)
+
+        assert source.latest_release(match) is None
+
+    def test_latest_release_returns_none_for_invalid_json(self, monkeypatch):
+        source = HayaseUpdateSource()
+        match = SourceMatch(source_name="hayase", source_url=HAYASE_API_URL)
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                raise ValueError("not json")
+
+        monkeypatch.setattr(hayase_module.httpx, "get", lambda url, *, timeout: Response())
+
+        assert source.latest_release(match) is None
+
+    def test_latest_release_returns_none_for_non_dict_payload(self, monkeypatch):
+        source = HayaseUpdateSource()
+        match = SourceMatch(source_name="hayase", source_url=HAYASE_API_URL)
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return ["not", "a", "dict"]
+
+        monkeypatch.setattr(hayase_module.httpx, "get", lambda url, *, timeout: Response())
+
+        assert source.latest_release(match) is None
+
+
+class TestWarpUpdateSource:
+    def test_matches_warp_host_from_homepage(self):
+        source = WarpUpdateSource()
+        context = PackageSourceContext(
+            category="x11-terms",
+            name="warp-bin",
+            src_uri=None,
+            homepage="https://www.warp.dev/download",
+        )
+
+        match = source.match(context)
+
+        assert match is not None
+        assert match.source_name == "warp"
+        assert match.source_url == WARP_CHANGELOG_URL
+
+    def test_matches_vendor_name_fallback_without_substring_false_positive(self):
+        source = WarpUpdateSource()
+        warp = PackageSourceContext("x11-terms", "warp-bin", None, None)
+        not_warp = PackageSourceContext("x11-terms", "timewarp-bin", None, None)
+
+        assert source.match(warp) is not None
+        assert source.match(not_warp) is None
+
+    def test_latest_release_returns_none_to_preserve_manual_check_fallback(self):
+        source = WarpUpdateSource()
+        match = SourceMatch(source_name="warp", source_url=WARP_CHANGELOG_URL)
+
+        assert source.latest_release(match) is None
+
+
+def test_default_registry_includes_hayase_and_warp_sources():
+    names = {source.name for source in DEFAULT_UPDATE_SOURCES}
+
+    assert names == {"hayase", "warp"}

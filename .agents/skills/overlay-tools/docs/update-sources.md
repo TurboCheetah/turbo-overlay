@@ -13,7 +13,9 @@ Each plugin implements:
 
 `latest_release()` should return `None` for non-fatal HTTP/JSON/parsing failures.
 That lets `check-updates` fall back to GitHub or `manual-check` without failing the
-whole update scan.
+whole update scan. Plugins that only provide a human-checkable upstream URL can
+also intentionally return `None`; `check-updates` will preserve that URL in the
+`manual-check` status.
 
 ## Adding a source
 
