@@ -16,6 +16,7 @@ from overlay_tools.core.ebuilds import (
     update_ebuild_var,
 )
 from overlay_tools.core.errors import ExternalToolMissingError, VersionError
+from overlay_tools.core.gh_utils import PullRequestRef
 from overlay_tools.core.git_utils import (
     format_git_error,
     git_add,
@@ -110,7 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MY_PV",
         help="Set MY_PV for upstream version mapping (e.g., for warp-bin)",
     )
-    parser.add_argument("-n", "--dry-run", action="store_true", help="Preview changes without applying")
+    parser.add_argument(
+        "-n", "--dry-run", action="store_true", help="Preview changes without applying"
+    )
     parser.add_argument("-s", "--skip-git", action="store_true", help="Skip git operations")
     parser.add_argument(
         "-l",
@@ -129,9 +132,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip Manifest update (for CI without ebuild command)",
     )
-    parser.add_argument("-y", "--yes", action="store_true", help="Non-interactive mode, assume yes to prompts")
-    parser.add_argument("--pr", action="store_true", help="Create a PR after committing (implies --yes)")
-    parser.add_argument("--base", metavar="BRANCH", help="Base branch for PR (default: auto-detect or master)")
+    parser.add_argument(
+        "-y", "--yes", action="store_true", help="Non-interactive mode, assume yes to prompts"
+    )
+    parser.add_argument(
+        "--pr", action="store_true", help="Create a PR after committing (implies --yes)"
+    )
+    parser.add_argument(
+        "--base", metavar="BRANCH", help="Base branch for PR (default: auto-detect or master)"
+    )
     parser.add_argument("--branch", metavar="BRANCH", help="Override the feature branch name")
     parser.add_argument("--draft", action="store_true", help="Create PR as draft")
     parser.add_argument("--upstream-url", metavar="URL", help="Upstream release URL for PR body")
@@ -365,7 +374,7 @@ def render_dry_run(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> i
     return 0
 
 
-def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None]:
+def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, PullRequestRef | None]:
     from overlay_tools.core.gh_utils import gh_find_open_update_pr_for_package, gh_require_available
 
     if git_has_changes(plan.context.repo_root):
@@ -399,7 +408,8 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
     if existing_pr_ref is None and (local_exists or remote_exists):
         if not git_fetch_branch(plan.context.repo_root, plan.context.base_branch):
             raise RuntimeError(
-                f"Failed to fetch origin/{plan.context.base_branch} before resetting {feature_branch}"
+                "Failed to fetch origin/"
+                f"{plan.context.base_branch} before resetting {feature_branch}"
             )
         log.step(
             "branch",
@@ -432,7 +442,9 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
 
 def commit_message_for_applied_changes(plan: UpdatePlan, applied_changes: AppliedChanges) -> str:
     commit_message = f"{plan.context.category}/{plan.context.name}: add {plan.normalized_version}"
-    dropped_versions = [parse_ebuild_filename(path).pv for path in applied_changes.deleted_ebuild_paths]
+    dropped_versions = [
+        parse_ebuild_filename(path).pv for path in applied_changes.deleted_ebuild_paths
+    ]
     if dropped_versions:
         commit_message += f", drop {', '.join(dropped_versions)}"
     return commit_message
@@ -468,7 +480,9 @@ def apply_ebuild_update(log: Logger, args: argparse.Namespace, plan: UpdatePlan)
     )
 
 
-def update_manifest_and_cache(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> RefreshedArtifacts:
+def update_manifest_and_cache(
+    log: Logger, args: argparse.Namespace, plan: UpdatePlan
+) -> RefreshedArtifacts:
     refreshed_paths: list[Path] = []
 
     if args.skip_manifest:
@@ -561,7 +575,9 @@ def should_commit(log: Logger, args: argparse.Namespace) -> bool:
             return False
 
 
-def commit_changes(log: Logger, plan: UpdatePlan, paths_to_add: list[Path], message: str | None = None) -> None:
+def commit_changes(
+    log: Logger, plan: UpdatePlan, paths_to_add: list[Path], message: str | None = None
+) -> None:
     git_add(paths_to_add, plan.context.repo_root)
     if not git_has_staged_changes(plan.context.repo_root):
         log.info("No changes to commit; branch already contains this update")
@@ -578,7 +594,7 @@ def create_or_update_pr(
     plan: UpdatePlan,
     *,
     feature_branch: str,
-    existing_pr_ref: object | None,
+    existing_pr_ref: PullRequestRef | None,
 ) -> int:
     from overlay_tools.core.gh_utils import gh_create_pr, gh_edit_pr, gh_require_available
 

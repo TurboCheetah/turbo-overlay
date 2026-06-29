@@ -1,11 +1,11 @@
-import pytest
 import json
-from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from overlay_tools.core.errors import ExternalToolMissingError
 from overlay_tools.core.gh_utils import (
-    PullRequestRef,
     gh_create_pr,
     gh_edit_pr,
     gh_find_open_update_pr_for_package,
@@ -13,7 +13,6 @@ from overlay_tools.core.gh_utils import (
     gh_is_available,
     gh_require_available,
 )
-from overlay_tools.core.errors import ExternalToolMissingError
 
 
 class TestGhIsAvailable:
@@ -28,10 +27,12 @@ class TestGhIsAvailable:
 
 class TestGhRequireAvailable:
     def test_raises_when_gh_not_found(self):
-        with patch("shutil.which", return_value=None):
-            with pytest.raises(ExternalToolMissingError) as exc_info:
-                gh_require_available()
-            assert "gh" in str(exc_info.value)
+        with (
+            patch("shutil.which", return_value=None),
+            pytest.raises(ExternalToolMissingError) as exc_info,
+        ):
+            gh_require_available()
+        assert "gh" in str(exc_info.value)
 
     def test_passes_when_gh_found(self):
         with patch("shutil.which", return_value="/usr/bin/gh"):
@@ -40,309 +41,346 @@ class TestGhRequireAvailable:
 
 class TestGhFindPrByHead:
     def test_returns_none_when_no_pr(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(stdout="[]")
-                result = gh_find_pr_by_head(tmp_path, head="feature/test")
-                assert result is None
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(stdout="[]")
+            result = gh_find_pr_by_head(tmp_path, head="feature/test")
+            assert result is None
 
     def test_returns_pr_ref_when_pr_exists(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    stdout=json.dumps(
-                        [
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                                "headRefName": "feature/test",
-                            }
-                        ]
-                    )
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                            "headRefName": "feature/test",
+                        }
+                    ]
                 )
-                result = gh_find_pr_by_head(tmp_path, head="feature/test")
-                assert result is not None
-                assert result.number == 42
-                assert result.state == "OPEN"
-                assert result.head_ref == "feature/test"
+            )
+            result = gh_find_pr_by_head(tmp_path, head="feature/test")
+            assert result is not None
+            assert result.number == 42
+            assert result.state == "OPEN"
+            assert result.head_ref == "feature/test"
 
     def test_handles_empty_response(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(stdout="")
-                result = gh_find_pr_by_head(tmp_path, head="feature/test")
-                assert result is None
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(stdout="")
+            result = gh_find_pr_by_head(tmp_path, head="feature/test")
+            assert result is None
 
 
 class TestGhFindOpenUpdatePrForPackage:
     def test_returns_none_when_no_prs(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(stdout="[]")
-                result = gh_find_open_update_pr_for_package(
-                    tmp_path, category="net-im", name="goofcord"
-                )
-                assert result is None
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(stdout="[]")
+            result = gh_find_open_update_pr_for_package(
+                tmp_path, category="net-im", name="goofcord"
+            )
+            assert result is None
 
     def test_finds_exact_match_branch(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    stdout=json.dumps(
-                        [
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                                "headRefName": "update/net-im-goofcord",
-                                "baseRefName": "master",
-                                "updatedAt": "2025-01-13T12:00:00Z",
-                            }
-                        ]
-                    )
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                            "headRefName": "update/net-im-goofcord",
+                            "baseRefName": "master",
+                            "updatedAt": "2025-01-13T12:00:00Z",
+                        }
+                    ]
                 )
-                result = gh_find_open_update_pr_for_package(
-                    tmp_path, category="net-im", name="goofcord"
-                )
-                assert result is not None
-                assert result.number == 42
-                assert result.head_ref == "update/net-im-goofcord"
+            )
+            result = gh_find_open_update_pr_for_package(
+                tmp_path, category="net-im", name="goofcord"
+            )
+            assert result is not None
+            assert result.number == 42
+            assert result.head_ref == "update/net-im-goofcord"
 
     def test_finds_legacy_versioned_branch(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    stdout=json.dumps(
-                        [
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                                "headRefName": "update/net-im-goofcord-1-0-1",
-                                "baseRefName": "master",
-                                "updatedAt": "2025-01-13T12:00:00Z",
-                            }
-                        ]
-                    )
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                            "headRefName": "update/net-im-goofcord-1-0-1",
+                            "baseRefName": "master",
+                            "updatedAt": "2025-01-13T12:00:00Z",
+                        }
+                    ]
                 )
-                result = gh_find_open_update_pr_for_package(
-                    tmp_path, category="net-im", name="goofcord"
-                )
-                assert result is not None
-                assert result.number == 42
-                assert result.head_ref == "update/net-im-goofcord-1-0-1"
+            )
+            result = gh_find_open_update_pr_for_package(
+                tmp_path, category="net-im", name="goofcord"
+            )
+            assert result is not None
+            assert result.number == 42
+            assert result.head_ref == "update/net-im-goofcord-1-0-1"
 
     def test_ignores_unrelated_branches(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    stdout=json.dumps(
-                        [
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                                "headRefName": "update/media-video-hayase",
-                                "baseRefName": "master",
-                                "updatedAt": "2025-01-13T12:00:00Z",
-                            },
-                            {
-                                "number": 43,
-                                "url": "https://github.com/owner/repo/pull/43",
-                                "state": "OPEN",
-                                "headRefName": "feature/something-else",
-                                "baseRefName": "master",
-                                "updatedAt": "2025-01-13T11:00:00Z",
-                            },
-                        ]
-                    )
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                            "headRefName": "update/media-video-hayase",
+                            "baseRefName": "master",
+                            "updatedAt": "2025-01-13T12:00:00Z",
+                        },
+                        {
+                            "number": 43,
+                            "url": "https://github.com/owner/repo/pull/43",
+                            "state": "OPEN",
+                            "headRefName": "feature/something-else",
+                            "baseRefName": "master",
+                            "updatedAt": "2025-01-13T11:00:00Z",
+                        },
+                    ]
                 )
-                result = gh_find_open_update_pr_for_package(
-                    tmp_path, category="net-im", name="goofcord"
-                )
-                assert result is None
+            )
+            result = gh_find_open_update_pr_for_package(
+                tmp_path, category="net-im", name="goofcord"
+            )
+            assert result is None
 
     def test_returns_most_recent_when_multiple(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    stdout=json.dumps(
-                        [
-                            {
-                                "number": 40,
-                                "url": "https://github.com/owner/repo/pull/40",
-                                "state": "OPEN",
-                                "headRefName": "update/net-im-goofcord-1-0-0",
-                                "baseRefName": "master",
-                                "updatedAt": "2025-01-10T12:00:00Z",
-                            },
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                                "headRefName": "update/net-im-goofcord-1-0-1",
-                                "baseRefName": "master",
-                                "updatedAt": "2025-01-13T12:00:00Z",
-                            },
-                        ]
-                    )
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 40,
+                            "url": "https://github.com/owner/repo/pull/40",
+                            "state": "OPEN",
+                            "headRefName": "update/net-im-goofcord-1-0-0",
+                            "baseRefName": "master",
+                            "updatedAt": "2025-01-10T12:00:00Z",
+                        },
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                            "headRefName": "update/net-im-goofcord-1-0-1",
+                            "baseRefName": "master",
+                            "updatedAt": "2025-01-13T12:00:00Z",
+                        },
+                    ]
                 )
-                result = gh_find_open_update_pr_for_package(
-                    tmp_path, category="net-im", name="goofcord"
-                )
-                assert result is not None
-                assert result.number == 42
+            )
+            result = gh_find_open_update_pr_for_package(
+                tmp_path, category="net-im", name="goofcord"
+            )
+            assert result is not None
+            assert result.number == 42
 
     def test_respects_base_filter(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    stdout=json.dumps(
-                        [
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                                "headRefName": "update/net-im-goofcord",
-                                "baseRefName": "develop",
-                                "updatedAt": "2025-01-13T12:00:00Z",
-                            }
-                        ]
-                    )
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                stdout=json.dumps(
+                    [
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                            "headRefName": "update/net-im-goofcord",
+                            "baseRefName": "develop",
+                            "updatedAt": "2025-01-13T12:00:00Z",
+                        }
+                    ]
                 )
-                result = gh_find_open_update_pr_for_package(
-                    tmp_path, category="net-im", name="goofcord", base="master"
-                )
-                assert result is None
+            )
+            result = gh_find_open_update_pr_for_package(
+                tmp_path, category="net-im", name="goofcord", base="master"
+            )
+            assert result is None
 
 
 class TestGhEditPr:
     def test_edits_title_and_body(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                gh_edit_pr(
-                    tmp_path,
-                    number=42,
-                    title="New Title",
-                    body="New Body",
-                )
-                mock_run.assert_called_once()
-                cmd = mock_run.call_args[0][0]
-                assert cmd == [
-                    "gh", "pr", "edit", "42",
-                    "--title", "New Title",
-                    "--body", "New Body",
-                ]
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            gh_edit_pr(
+                tmp_path,
+                number=42,
+                title="New Title",
+                body="New Body",
+            )
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert cmd == [
+                "gh",
+                "pr",
+                "edit",
+                "42",
+                "--title",
+                "New Title",
+                "--body",
+                "New Body",
+            ]
 
     def test_edits_only_title(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                gh_edit_pr(tmp_path, number=42, title="New Title")
-                mock_run.assert_called_once()
-                cmd = mock_run.call_args[0][0]
-                assert cmd == ["gh", "pr", "edit", "42", "--title", "New Title"]
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            gh_edit_pr(tmp_path, number=42, title="New Title")
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert cmd == ["gh", "pr", "edit", "42", "--title", "New Title"]
 
     def test_edits_only_body(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                gh_edit_pr(tmp_path, number=42, body="New Body")
-                mock_run.assert_called_once()
-                cmd = mock_run.call_args[0][0]
-                assert cmd == ["gh", "pr", "edit", "42", "--body", "New Body"]
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            gh_edit_pr(tmp_path, number=42, body="New Body")
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert cmd == ["gh", "pr", "edit", "42", "--body", "New Body"]
 
     def test_noop_when_nothing_to_edit(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                gh_edit_pr(tmp_path, number=42)
-                mock_run.assert_not_called()
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            gh_edit_pr(tmp_path, number=42)
+            mock_run.assert_not_called()
 
     def test_falls_back_to_rest_api_when_pr_edit_fails(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.side_effect = [
-                    CalledProcessError(1, ["gh", "pr", "edit", "42"]),
-                    MagicMock(returncode=0),
-                ]
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.side_effect = [
+                CalledProcessError(1, ["gh", "pr", "edit", "42"]),
+                MagicMock(returncode=0),
+            ]
 
-                gh_edit_pr(
-                    tmp_path,
-                    number=42,
-                    title="New Title",
-                    body="New Body",
-                )
+            gh_edit_pr(
+                tmp_path,
+                number=42,
+                title="New Title",
+                body="New Body",
+            )
 
-                api_cmd = mock_run.call_args_list[1][0][0]
-                assert api_cmd == [
-                    "gh",
-                    "api",
-                    "-X",
-                    "PATCH",
-                    "repos/:owner/:repo/pulls/42",
-                    "-f",
-                    "title=New Title",
-                    "-f",
-                    "body=New Body",
-                ]
+            api_cmd = mock_run.call_args_list[1][0][0]
+            assert api_cmd == [
+                "gh",
+                "api",
+                "-X",
+                "PATCH",
+                "repos/:owner/:repo/pulls/42",
+                "-f",
+                "title=New Title",
+                "-f",
+                "body=New Body",
+            ]
 
 
 class TestGhCreatePr:
     def test_creates_pr_successfully(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.side_effect = [
-                    MagicMock(stdout="https://github.com/owner/repo/pull/42\n"),
-                    MagicMock(
-                        stdout=json.dumps(
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "OPEN",
-                            }
-                        )
-                    ),
-                ]
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.side_effect = [
+                MagicMock(stdout="https://github.com/owner/repo/pull/42\n"),
+                MagicMock(
+                    stdout=json.dumps(
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "OPEN",
+                        }
+                    )
+                ),
+            ]
 
-                result = gh_create_pr(
-                    tmp_path,
-                    title="Test PR",
-                    body="Test body",
-                    head="feature/test",
-                    base="main",
-                )
+            result = gh_create_pr(
+                tmp_path,
+                title="Test PR",
+                body="Test body",
+                head="feature/test",
+                base="main",
+            )
 
-                assert result.number == 42
-                assert result.url == "https://github.com/owner/repo/pull/42"
+            assert result.number == 42
+            assert result.url == "https://github.com/owner/repo/pull/42"
 
     def test_creates_draft_pr(self, tmp_path):
-        with patch("shutil.which", return_value="/usr/bin/gh"):
-            with patch("overlay_tools.core.gh_utils.run") as mock_run:
-                mock_run.side_effect = [
-                    MagicMock(stdout="https://github.com/owner/repo/pull/42\n"),
-                    MagicMock(
-                        stdout=json.dumps(
-                            {
-                                "number": 42,
-                                "url": "https://github.com/owner/repo/pull/42",
-                                "state": "DRAFT",
-                            }
-                        )
-                    ),
-                ]
+        with (
+            patch("shutil.which", return_value="/usr/bin/gh"),
+            patch("overlay_tools.core.gh_utils.run") as mock_run,
+        ):
+            mock_run.side_effect = [
+                MagicMock(stdout="https://github.com/owner/repo/pull/42\n"),
+                MagicMock(
+                    stdout=json.dumps(
+                        {
+                            "number": 42,
+                            "url": "https://github.com/owner/repo/pull/42",
+                            "state": "DRAFT",
+                        }
+                    )
+                ),
+            ]
 
-                result = gh_create_pr(
-                    tmp_path,
-                    title="Test PR",
-                    body="Test body",
-                    head="feature/test",
-                    base="main",
-                    draft=True,
-                )
+            result = gh_create_pr(
+                tmp_path,
+                title="Test PR",
+                body="Test body",
+                head="feature/test",
+                base="main",
+                draft=True,
+            )
 
-                assert result.number == 42
-                assert result.url == "https://github.com/owner/repo/pull/42"
-                assert result.state == "DRAFT"
+            assert result.number == 42
+            assert result.url == "https://github.com/owner/repo/pull/42"
+            assert result.state == "DRAFT"
 
-                create_call = mock_run.call_args_list[0]
-                cmd = create_call[0][0]
-                assert "--draft" in cmd
+            create_call = mock_run.call_args_list[0]
+            cmd = create_call[0][0]
+            assert "--draft" in cmd

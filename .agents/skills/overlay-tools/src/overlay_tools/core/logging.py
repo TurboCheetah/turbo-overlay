@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from rich.console import Console as RichConsole
-    from rich.progress import Progress as RichProgress
+    pass
 
 
 def _get_rich() -> tuple[Any, ...] | None:
@@ -152,7 +152,9 @@ class Logger:
             table.add_column(style="dim", no_wrap=True)
             table.add_column()
             table.add_row("Package", f"[package]{category}/{name}[/package]")
-            table.add_row("Change", f"[version.old]{old}[/version.old] → [version.new]{new}[/version.new]")
+            table.add_row(
+                "Change", f"[version.old]{old}[/version.old] → [version.new]{new}[/version.new]"
+            )
             self.console.print(table)
         else:
             print(f"{category}/{name}", file=sys.stderr)

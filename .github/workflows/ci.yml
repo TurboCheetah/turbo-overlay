@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  overlay-tools:
+    name: overlay-tools (ruff, ty, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            .agents/skills/overlay-tools/uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync overlay-tools dev dependencies
+        working-directory: .agents/skills/overlay-tools
+        run: uv sync --group dev
+
+      - name: ruff check
+        working-directory: .agents/skills/overlay-tools
+        run: uv run ruff check .
+
+      - name: ruff format
+        working-directory: .agents/skills/overlay-tools
+        run: uv run ruff format --check .
+
+      - name: ty
+        working-directory: .agents/skills/overlay-tools
+        run: uv run ty check src
+
+      - name: pytest
+        working-directory: .agents/skills/overlay-tools
+        run: uv run pytest -q

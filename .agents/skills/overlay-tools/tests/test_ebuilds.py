@@ -1,10 +1,10 @@
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 from overlay_tools.core.ebuilds import (
     EbuildName,
-    find_ebuilds,
     parse_ebuild_filename,
     read_ebuild_vars,
     select_latest_ebuild,

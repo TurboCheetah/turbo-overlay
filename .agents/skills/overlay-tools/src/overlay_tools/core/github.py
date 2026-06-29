@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import time
@@ -10,7 +11,6 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from overlay_tools.core.versions import normalize_upstream_version
-
 
 GITHUB_REPO_RE = re.compile(r"github\.com/([^/]+/[^/]+)")
 CACHE_TTL_SECONDS = 1800
@@ -101,12 +101,10 @@ class GitHubClient:
         cache_path = self._get_cache_path(repo)
         if not cache_path:
             return
-        try:
+        with contextlib.suppress(OSError):
             cache_path.write_text(
                 json.dumps({"tag": info.tag, "version": info.version, "url": info.url})
             )
-        except OSError:
-            pass
 
     def get_latest_release(self, repo: str, channel: str | None = None) -> ReleaseInfo | None:
         cached = self._read_cache(repo)

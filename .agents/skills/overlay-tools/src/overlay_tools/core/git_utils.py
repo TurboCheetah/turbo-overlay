@@ -9,13 +9,13 @@ from overlay_tools.core.subprocess_utils import run
 
 def is_git_repo(path: Path) -> bool:
     """Check if the given path is inside a git repository.
-    
+
     Args:
         path: Path to check
-        
+
     Returns:
         True if path is inside a git work tree, False otherwise
-        
+
     Raises:
         ExternalToolMissingError: If git command is not found in PATH
     """
@@ -27,11 +27,10 @@ def is_git_repo(path: Path) -> bool:
             capture=True,
         )
         return result.returncode == 0
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise ExternalToolMissingError(
-            "git",
-            "Install git: emerge dev-vcs/git / apt install git / brew install git"
-        )
+            "git", "Install git: emerge dev-vcs/git / apt install git / brew install git"
+        ) from e
 
 
 def git_root(path: Path) -> Path:

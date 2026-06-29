@@ -38,7 +38,17 @@ def gh_find_pr_by_head(
 ) -> PullRequestRef | None:
     gh_require_available()
 
-    cmd = ["gh", "pr", "list", "--head", head, "--json", "number,url,state,headRefName", "--limit", "1"]
+    cmd = [
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        head,
+        "--json",
+        "number,url,state,headRefName",
+        "--limit",
+        "1",
+    ]
     if base:
         cmd.extend(["--base", base])
 
@@ -82,10 +92,15 @@ def gh_find_open_update_pr_for_package(
 
     # List all open PRs with branch info
     cmd = [
-        "gh", "pr", "list",
-        "--state", "open",
-        "--json", "number,url,state,headRefName,baseRefName,updatedAt",
-        "--limit", "100",
+        "gh",
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,url,state,headRefName,baseRefName,updatedAt",
+        "--limit",
+        "100",
     ]
 
     result = run(cmd, cwd=repo_root, check=True, capture=True)
