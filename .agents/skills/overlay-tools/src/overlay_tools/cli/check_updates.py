@@ -15,10 +15,18 @@ from overlay_tools.core.github import (
 )
 from overlay_tools.core.logging import Logger, set_logger
 from overlay_tools.core.overlay import find_overlay_root, find_packages
-from overlay_tools.core.package_sources import get_custom_url
-from overlay_tools.core.report import PackageStatus, build_status, render_json, render_terminal_report
+from overlay_tools.core.report import (
+    PackageStatus,
+    build_status,
+    render_json,
+    render_terminal_report,
+)
+from overlay_tools.core.update_sources import (
+    DEFAULT_UPDATE_SOURCES,
+    PackageSourceContext,
+    find_source_match,
+)
 from overlay_tools.core.versions import compare_versions, upstream_to_gentoo
-
 
 CHANNEL_SUFFIXES = ("stable", "preview", "dev")
 
@@ -63,10 +71,49 @@ def check_channel_ebuild(
     if not github_repo:
         github_repo = extract_github_repo_from_path(pkg_path / "metadata.xml")
 
-    custom_url = get_custom_url(name, src_uri, homepage)
-
+    source_context = PackageSourceContext(
+        category=category,
+        name=name,
+        src_uri=src_uri,
+        homepage=homepage,
+    )
+    source_match_result = find_source_match(source_context, DEFAULT_UPDATE_SOURCES)
+    source_match = source_match_result[1] if source_match_result else None
+    custom_url = source_match.source_url if source_match else None
     my_pv = ebuild_vars.get("MY_PV")
     channel = _derive_channel(my_pv)
+
+    if source_match_result:
+        source, source_match = source_match_result
+        source_release = source.latest_release(source_match)
+        if source_release is None:
+            if not source_match.fallback_to_github:
+                return build_status(
+                    category=category,
+                    name=name,
+                    current_version=current_version,
+                    github_repo=github_repo,
+                    custom_url=source_match.source_url,
+                    status="manual-check",
+                    my_pv=my_pv,
+                )
+        else:
+            cmp = compare_versions(current_version, source_release.version)
+            status = "update-available" if cmp < 0 else "up-to-date"
+            gentoo_version = upstream_to_gentoo(source_release.version)
+
+            return build_status(
+                category=category,
+                name=name,
+                current_version=current_version,
+                latest_version=source_release.version,
+                gentoo_version=gentoo_version,
+                github_repo=github_repo,
+                custom_url=source_match.source_url,
+                status=status,
+                latest_url=source_release.url,
+                my_pv=my_pv,
+            )
 
     if github_repo:
         try:
@@ -176,7 +223,10 @@ def check_package(
     # Pick the channel whose latest ebuild is the overall highest version.
     # This is the ebuild Portage would select by default — check *that*
     # channel against upstream.
-    best_channel = max(channels.items(), key=cmp_to_key(lambda a, b: compare_versions(a[1].pv, b[1].pv)))  # type: ignore[arg-type]
+    best_channel = max(
+        channels.items(),
+        key=cmp_to_key(lambda a, b: compare_versions(a[1].pv, b[1].pv)),
+    )  # type: ignore[arg-type]
     _, best_ebuild = best_channel
     return check_channel_ebuild(category, name, best_ebuild, pkg_path, github_client)
 
