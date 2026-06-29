@@ -41,40 +41,6 @@ ebuild path/to/ebuild clean setup unpack prepare configure compile install
 
 ---
 
-## Pre-Commit Review
-
-Before committing, run `cubic review` or ask the agent to "review my code".
-Fix the validated issues and run the local review again.
-Repeat until the local review is clean or only disputed issues remain.
-
-Do not expect the cubic CLI and GitHub PR review to return identical results.
-The CLI is faster and less thorough.
-
-Layered gates (run in this order):
-
-```bash
-# 1. Local code review (cubic)
-cubic review
-
-# 2. QA validation (pkgcheck)
-pkgcheck scan -f latest category/package
-
-# 3. Commit only after both are clean
-git add -A && git commit -m "<message>"
-```
-
-Notes:
-- `cubic` requires the binary at `~/.cubic/bin/cubic` and `CUBIC_*` auth
-  configured via `cubic setup`. If missing, install via the official script:
-  `curl -sSfL https://cubic.dev/install | bash`.
-- Cubic is heuristic. False positives are expected on ebuild templates
-  (variable naming, license header conventions). Apply judgment: keep the
-  templated style unless the issue is a real bug.
-- pkgcheck remains the hard gate. A clean cubic with a failing pkgcheck
-  is not shippable.
-
----
-
 ## Overlay Maintenance Tools
 
 Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/astral-sh/uv).

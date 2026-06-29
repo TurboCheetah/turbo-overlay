@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 from subprocess import CalledProcessError
+from typing import Any
 
 import pytest
 
@@ -20,6 +21,7 @@ from overlay_tools.cli.update_ebuild import (
 )
 from overlay_tools.core.ebuilds import EbuildName
 from overlay_tools.core.gh_utils import PullRequestRef
+from overlay_tools.core.logging import Logger
 from overlay_tools.core.overlay import (
     metadata_cache_path,
     read_repo_name,
@@ -215,11 +217,14 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         calls: list[tuple[str, object]] = []
 
-        class Log:
-            def info(self, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def info(self, message: str, **_kwargs: Any) -> None:
                 calls.append(("info", message))
 
-            def success(self, message: str) -> None:
+            def success(self, message: str, **_kwargs: Any) -> None:
                 calls.append(("success", message))
 
         monkeypatch.setattr(
@@ -245,11 +250,14 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         messages: list[str] = []
 
-        class Log:
-            def info(self, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def info(self, message: str, **_kwargs: Any) -> None:
                 messages.append(message)
 
-            def success(self, message: str) -> None:
+            def success(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         monkeypatch.setattr(
@@ -272,8 +280,9 @@ class TestCommitFlowHelpers:
         context = make_context(tmp_path)
         plan = build_update_plan(context, "0.0.11", keep_old=False)
 
-        class Log:
-            pass
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
 
         monkeypatch.setattr(
             "overlay_tools.cli.update_ebuild.git_has_changes", lambda repo_root: True
@@ -289,14 +298,17 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         calls: list[tuple[str, str, str | None]] = []
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 calls.append((label, message, None))
 
-            def warning(self, message: str) -> None:
+            def warning(self, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def info(self, message: str) -> None:
+            def info(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         monkeypatch.setattr(
@@ -341,14 +353,17 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         calls: list[tuple[str, str, str | None]] = []
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 calls.append((label, message, None))
 
-            def warning(self, message: str) -> None:
+            def warning(self, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def info(self, message: str) -> None:
+            def info(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         monkeypatch.setattr(
@@ -392,14 +407,17 @@ class TestCommitFlowHelpers:
             head_ref=context.feature_branch,
         )
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 calls.append((label, message))
 
-            def warning(self, message: str) -> None:
+            def warning(self, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def info(self, message: str) -> None:
+            def info(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         monkeypatch.setattr(
@@ -536,8 +554,11 @@ class TestCommitFlowHelpers:
     def test_should_commit_returns_true_for_yes_flag(self, monkeypatch):
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
-        class StubLog:
-            def info(self, message: str) -> None:
+        class StubLog(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def info(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         assert should_commit(
@@ -548,8 +569,11 @@ class TestCommitFlowHelpers:
     def test_should_commit_skips_noninteractive_without_yes(self, monkeypatch):
         messages: list[str] = []
 
-        class Log:
-            def info(self, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def info(self, message: str, **_kwargs: Any) -> None:
                 messages.append(message)
 
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -565,11 +589,14 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         plan.new_path.write_text("", encoding="utf-8")
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def success(self, message: str) -> None:
+            def success(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         monkeypatch.setattr(
@@ -602,14 +629,17 @@ class TestCommitFlowHelpers:
 
         warnings: list[str] = []
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def success(self, message: str) -> None:
+            def success(self, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def warning(self, message: str) -> None:
+            def warning(self, message: str, **_kwargs: Any) -> None:
                 warnings.append(message)
 
         monkeypatch.setattr(
@@ -655,14 +685,17 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         plan.new_path.write_text("", encoding="utf-8")
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def success(self, message: str) -> None:
+            def success(self, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def warning(self, message: str) -> None:
+            def warning(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         monkeypatch.setattr(
@@ -696,14 +729,17 @@ class TestCommitFlowHelpers:
         plan = build_update_plan(context, "0.0.11", keep_old=False)
         messages: list[tuple[str, str]] = []
 
-        class Log:
-            def step(self, label: str, message: str) -> None:
+        class Log(Logger):
+            def __init__(self) -> None:
+                super().__init__(quiet=True)
+
+            def step(self, label: str, message: str, **_kwargs: Any) -> None:
                 messages.append((label, message))
 
-            def success(self, message: str) -> None:
+            def success(self, message: str, **_kwargs: Any) -> None:
                 pass
 
-            def warning(self, message: str) -> None:
+            def warning(self, message: str, **_kwargs: Any) -> None:
                 pass
 
         result = render_dry_run(

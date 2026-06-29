@@ -30,6 +30,10 @@ target-version = "py311"
 [tool.ruff.lint]
 extend-select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ty.environment]
+python-version = "3.11"
+root = ["./src"]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.0.0,<5",

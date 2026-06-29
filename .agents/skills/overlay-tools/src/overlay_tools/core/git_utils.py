@@ -27,10 +27,10 @@ def is_git_repo(path: Path) -> bool:
             capture=True,
         )
         return result.returncode == 0
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise ExternalToolMissingError(
             "git", "Install git: emerge dev-vcs/git / apt install git / brew install git"
-        )
+        ) from e
 
 
 def git_root(path: Path) -> Path:

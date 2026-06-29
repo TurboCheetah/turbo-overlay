@@ -16,6 +16,7 @@ from overlay_tools.core.ebuilds import (
     update_ebuild_var,
 )
 from overlay_tools.core.errors import ExternalToolMissingError, VersionError
+from overlay_tools.core.gh_utils import PullRequestRef
 from overlay_tools.core.git_utils import (
     format_git_error,
     git_add,
@@ -373,7 +374,7 @@ def render_dry_run(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> i
     return 0
 
 
-def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None]:
+def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, PullRequestRef | None]:
     from overlay_tools.core.gh_utils import gh_find_open_update_pr_for_package, gh_require_available
 
     if git_has_changes(plan.context.repo_root):
@@ -407,7 +408,8 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, object | None
     if existing_pr_ref is None and (local_exists or remote_exists):
         if not git_fetch_branch(plan.context.repo_root, plan.context.base_branch):
             raise RuntimeError(
-                f"Failed to fetch origin/{plan.context.base_branch} before resetting {feature_branch}"
+                "Failed to fetch origin/"
+                f"{plan.context.base_branch} before resetting {feature_branch}"
             )
         log.step(
             "branch",
@@ -592,7 +594,7 @@ def create_or_update_pr(
     plan: UpdatePlan,
     *,
     feature_branch: str,
-    existing_pr_ref: object | None,
+    existing_pr_ref: PullRequestRef | None,
 ) -> int:
     from overlay_tools.core.gh_utils import gh_create_pr, gh_edit_pr, gh_require_available
 
