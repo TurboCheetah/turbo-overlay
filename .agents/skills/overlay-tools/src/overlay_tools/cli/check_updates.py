@@ -15,7 +15,7 @@ from overlay_tools.core.github import (
 )
 from overlay_tools.core.logging import Logger, set_logger
 from overlay_tools.core.overlay import find_overlay_root, find_packages
-from overlay_tools.core.package_sources import get_custom_url
+from overlay_tools.core.package_sources import get_custom_latest_release, get_custom_url
 from overlay_tools.core.report import PackageStatus, build_status, render_json, render_terminal_report
 from overlay_tools.core.versions import compare_versions, upstream_to_gentoo
 
@@ -64,9 +64,27 @@ def check_channel_ebuild(
         github_repo = extract_github_repo_from_path(pkg_path / "metadata.xml")
 
     custom_url = get_custom_url(name, src_uri, homepage)
-
     my_pv = ebuild_vars.get("MY_PV")
     channel = _derive_channel(my_pv)
+
+    custom_release = get_custom_latest_release(custom_url)
+    if custom_release:
+        cmp = compare_versions(current_version, custom_release.version)
+        status = "update-available" if cmp < 0 else "up-to-date"
+        gentoo_version = upstream_to_gentoo(custom_release.version)
+
+        return build_status(
+            category=category,
+            name=name,
+            current_version=current_version,
+            latest_version=custom_release.version,
+            gentoo_version=gentoo_version,
+            github_repo=github_repo,
+            custom_url=custom_url,
+            status=status,
+            latest_url=custom_release.url,
+            my_pv=my_pv,
+        )
 
     if github_repo:
         try:

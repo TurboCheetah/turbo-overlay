@@ -1,4 +1,20 @@
-from overlay_tools.core.package_sources import get_custom_url
+from overlay_tools.core.package_sources import get_custom_url, parse_hayase_latest
+
+
+class TestHayaseLatest:
+    def test_extracts_latest_linux_deb_version(self):
+        payload = {
+            "android-6.4.52.apk": "https://api.hayase.watch/files/android-6.4.52.apk",
+            "linux-hayase-6.4.79-linux.AppImage": "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.AppImage",
+            "linux-hayase-6.4.79-linux.deb": "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb",
+            "latest-linux.yml": "https://api.hayase.watch/files/latest-linux.yml",
+        }
+
+        release = parse_hayase_latest(payload)
+
+        assert release is not None
+        assert release.version == "6.4.79"
+        assert release.url == "https://api.hayase.watch/files/linux-hayase-6.4.79-linux.deb"
 
 
 class TestGetCustomUrl:
