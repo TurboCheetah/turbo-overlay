@@ -1,11 +1,11 @@
-import pytest
 import json
-from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from overlay_tools.core.errors import ExternalToolMissingError
 from overlay_tools.core.gh_utils import (
-    PullRequestRef,
     gh_create_pr,
     gh_edit_pr,
     gh_find_open_update_pr_for_package,
@@ -13,7 +13,6 @@ from overlay_tools.core.gh_utils import (
     gh_is_available,
     gh_require_available,
 )
-from overlay_tools.core.errors import ExternalToolMissingError
 
 
 class TestGhIsAvailable:

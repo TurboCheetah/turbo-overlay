@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cmp_to_key
-import os
 from pathlib import Path
 
 from overlay_tools.core.ebuilds import EbuildName, find_ebuilds, select_latest_ebuild
 from overlay_tools.core.versions import compare_versions
-
 
 KEEP_VERSIONS_ENV_VAR = "OVERLAY_TOOLS_KEEP_VERSIONS"
 DEFAULT_KEEP_VERSIONS = 3

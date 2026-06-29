@@ -2,7 +2,6 @@ import pytest
 
 from overlay_tools.core.errors import VersionError
 from overlay_tools.core.versions import (
-    GentooVersion,
     compare_versions,
     normalize_gentoo_version,
     normalize_upstream_version,

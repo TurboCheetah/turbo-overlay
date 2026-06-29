@@ -11,7 +11,6 @@ import httpx
 
 from overlay_tools.core.versions import normalize_upstream_version
 
-
 GITHUB_REPO_RE = re.compile(r"github\.com/([^/]+/[^/]+)")
 CACHE_TTL_SECONDS = 1800
 
