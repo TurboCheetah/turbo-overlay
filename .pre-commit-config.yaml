@@ -1,0 +1,27 @@
+# Pre-commit hooks for turbo-overlay.
+#
+# Install: `uv tool run pre-commit install` (or `pre-commit install` from a
+# venv).  Run on demand: `pre-commit run --all-files`.
+#
+# Dev tooling (ruff, ty, pre-commit) is pinned in
+# .agents/skills/overlay-tools/pyproject.toml under [dependency-groups].dev.
+# The ruff revisions here follow the pinned ruff range. The ty hook runs in
+# the project's own venv via 'language: system' because ty needs the
+# 'overlay_tools' package importable; it requires the dev group to be
+# installed (e.g. `uv sync --group dev` in .agents/skills/overlay-tools/).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (overlay-tools)
+        entry: bash -c 'cd .agents/skills/overlay-tools && uv run ty check src'
+        language: system
+        pass_filenames: false
+        files: ^\.agents/skills/overlay-tools/src/
+

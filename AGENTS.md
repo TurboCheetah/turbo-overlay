@@ -78,6 +78,26 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 
 The workflow at `.github/workflows/check-updates.yml` runs weekly to check for updates and create PRs automatically.
 
+### Linting & Type Checking
+
+`overlay-tools` uses [ruff](https://docs.astral.sh/ruff/) (lint + format) and [ty](https://docs.astral.sh/ty/) (type checker) — `mypy` is not used. Both are pinned in `.agents/skills/overlay-tools/pyproject.toml` under `[dependency-groups].dev` (install with `uv sync --group dev` in that directory). Pre-commit hooks in `.pre-commit-config.yaml` run ruff and ty automatically on commit.
+
+```bash
+# Lint and format overlay-tools
+cd .agents/skills/overlay-tools
+uv run ruff check .
+uv run ruff format .
+uv run ty check src
+uv run pytest -q
+
+# Run pre-commit on the whole repo (from repo root)
+pre-commit run --all-files
+```
+
+Ruff rules enabled: `E`, `F`, `I`, `UP`, `B`, `SIM` (via `extend-select` in
+`pyproject.toml`). Line length: 100. Target: Python 3.11+. The same checks
+run in CI via `.github/workflows/ci.yml`.
+
 ---
 
 ## Code Style Guidelines
