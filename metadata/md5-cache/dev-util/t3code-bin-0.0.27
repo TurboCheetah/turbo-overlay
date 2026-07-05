@@ -10,5 +10,5 @@ RDEPEND=app-accessibility/at-spi2-core:2 dev-libs/expat dev-libs/glib:2 dev-libs
 RESTRICT=strip
 SLOT=0
 SRC_URI=https://github.com/pingdotgg/t3code/releases/download/v0.0.27/T3-Code-0.0.27-x86_64.AppImage https://raw.githubusercontent.com/pingdotgg/t3code/876bbd715ae6aa8e1d663455747e17c92e0a287c/apps/desktop/resources/icon.png -> t3code-bin-0.0.27-icon.png https://raw.githubusercontent.com/pingdotgg/t3code/876bbd715ae6aa8e1d663455747e17c92e0a287c/LICENSE -> t3code-bin-0.0.27-LICENSE
-_eclasses_=desktop	26d57169ca094c04be416993844ec8bc	xdg	3ef49a87c52c8b77c476351195dfe575	xdg-utils	42869b3c8d86a70ef3cf75165a395e09
+_eclasses_=desktop	e447b5f77146d69797e9f03ff177f3f1	xdg	3ef49a87c52c8b77c476351195dfe575	xdg-utils	42869b3c8d86a70ef3cf75165a395e09
 _md5_=bb9072db3625e169743e24fae1a66e61
