@@ -8,6 +8,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,6 +19,6 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Run pkgcheck
-        uses: pkgcore/pkgcheck-action@v1
+        uses: pkgcore/pkgcheck-action@8491e92faa1010d5c6947c114d23215e5a74684e # v1
         with:
           args: --keywords=-RedundantVersion,-NonsolvableDepsInDev
