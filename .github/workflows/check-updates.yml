@@ -15,12 +15,9 @@ on:
         required: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 env:
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   GIT_TERMINAL_PROMPT: "0"
 
 jobs:
@@ -30,6 +27,8 @@ jobs:
       results_json: ${{ steps.check.outputs.results }}
       updates_json: ${{ steps.check.outputs.updates }}
       has_updates: ${{ steps.check.outputs.has_updates }}
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
@@ -95,6 +94,27 @@ jobs:
       UPDATES_JSON: ${{ needs.check-updates.outputs.updates_json }}
 
     steps:
+      - name: Validate update bot configuration
+        env:
+          UPDATE_BOT_APP_ID: ${{ vars.UPDATE_BOT_APP_ID }}
+          UPDATE_BOT_PRIVATE_KEY: ${{ secrets.UPDATE_BOT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${UPDATE_BOT_APP_ID}" ] || [ -z "${UPDATE_BOT_PRIVATE_KEY}" ]; then
+            echo "::error::UPDATE_BOT_APP_ID repository variable and UPDATE_BOT_PRIVATE_KEY repository secret are required to create update PRs."
+            exit 1
+          fi
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.UPDATE_BOT_APP_ID }}
+          private-key: ${{ secrets.UPDATE_BOT_PRIVATE_KEY }}
+          permission-metadata: read
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Install dependencies
         run: |
           emerge-webrsync
@@ -106,6 +126,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Configure Portage repositories
         shell: bash
@@ -170,9 +192,13 @@ jobs:
           install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
 
       - name: Configure git
+        env:
+          UPDATE_BOT_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          set -euo pipefail
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${UPDATE_BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Verify git is available
         run: |
@@ -182,6 +208,9 @@ jobs:
 
       - name: Create PRs
         shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
