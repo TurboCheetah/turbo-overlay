@@ -8,7 +8,7 @@ from packaging import version as pkg_version
 
 from overlay_tools.core.errors import VersionError
 
-SuffixType = Literal["alpha", "beta", "pre", "rc", "p", None]
+SuffixType = Literal["alpha", "beta", "pre", "rc", "p"] | None
 
 GENTOO_VERSION_RE = re.compile(
     r"^"
@@ -129,7 +129,7 @@ def compare_versions(a: str, b: str) -> int:
         elif va < vb:
             return -1
         return 0
-    except Exception:
+    except pkg_version.InvalidVersion:
         if a > b:
             return 1
         elif a < b:

@@ -100,6 +100,11 @@ class TestCompareVersions:
     def test_equal_after_prefixed_tag_normalization(self):
         assert compare_versions("3.3.1", normalize_upstream_version("ipinfo-3.3.1")) == 0
 
+    def test_invalid_versions_fall_back_to_lexical_order(self):
+        assert compare_versions("foo", "bar") == 1
+        assert compare_versions("bar", "foo") == -1
+        assert compare_versions("foo", "foo") == 0
+
 
 class TestNormalizeUpstreamVersion:
     def test_strips_v_prefix(self):
