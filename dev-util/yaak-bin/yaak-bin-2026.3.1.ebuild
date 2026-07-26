@@ -34,6 +34,7 @@ src_install() {
 	dosym yaak-app /usr/bin/yaak
 
 	# Preserve executable bits on bundled helper binaries.
+	dodir /usr/lib
 	cp -a usr/lib/yaak "${ED}"/usr/lib/ || die
 
 	domenu usr/share/applications/yaak.desktop || die
