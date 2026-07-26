@@ -19,18 +19,15 @@ from overlay_tools.core.versions import (
 )
 
 __all__ = [
-    # errors
-    "OverlayToolsError",
-    "VersionError",
     "EbuildParseError",
     "ExternalToolMissingError",
-    # versions
-    "normalize_gentoo_version",
-    "compare_versions",
-    "parse_gentoo_version",
     "GentooVersion",
-    # ebuilds
+    "OverlayToolsError",
+    "VersionError",
+    "compare_versions",
+    "normalize_gentoo_version",
     "parse_ebuild_filename",
+    "parse_gentoo_version",
     "read_ebuild_vars",
     "update_ebuild_var",
 ]

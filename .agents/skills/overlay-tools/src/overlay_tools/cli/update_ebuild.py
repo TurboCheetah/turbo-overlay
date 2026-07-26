@@ -15,7 +15,7 @@ from overlay_tools.core.ebuilds import (
     select_latest_ebuild,
     update_ebuild_var,
 )
-from overlay_tools.core.errors import ExternalToolMissingError, VersionError
+from overlay_tools.core.errors import ExternalToolMissingError, OverlayToolsError, VersionError
 from overlay_tools.core.gh_utils import PullRequestRef
 from overlay_tools.core.git_utils import (
     format_git_error,
@@ -360,7 +360,7 @@ def render_dry_run(log: Logger, args: argparse.Namespace, plan: UpdatePlan) -> i
                     name=plan.context.name,
                     base=plan.context.base_branch,
                 )
-            except Exception as exc:
+            except (CalledProcessError, ExternalToolMissingError, OSError) as exc:
                 log.warning(f"Could not check for existing PRs: {exc}")
 
         if existing_pr:
@@ -398,7 +398,7 @@ def prepare_pr_branch(log: Logger, plan: UpdatePlan) -> tuple[str, PullRequestRe
             log.step("pr", f"reuse #{existing_pr_ref.number} on {feature_branch}")
     except ExternalToolMissingError:
         pass
-    except Exception as exc:
+    except (CalledProcessError, OSError) as exc:
         log.warning(f"Could not check for existing PRs: {exc}")
         log.info("Will create new PR if none exists for this branch")
 
@@ -548,10 +548,8 @@ def collect_paths_to_stage(
         for cache_path in sorted(cache_dir.glob(f"{plan.context.name}-*")):
             if cache_path not in paths_to_add:
                 paths_to_add.append(cache_path)
-    for deleted_ebuild_path in applied_changes.deleted_ebuild_paths:
-        paths_to_add.append(deleted_ebuild_path)
-    for deleted_cache_path in applied_changes.deleted_cache_paths:
-        paths_to_add.append(deleted_cache_path)
+    paths_to_add.extend(applied_changes.deleted_ebuild_paths)
+    paths_to_add.extend(applied_changes.deleted_cache_paths)
     return paths_to_add
 
 
@@ -600,7 +598,7 @@ def create_or_update_pr(
 
     try:
         gh_require_available()
-    except Exception as exc:
+    except ExternalToolMissingError as exc:
         log.error(str(exc))
         log.info("Commit was created but PR was not. Push manually and create PR.")
         return 1
@@ -609,7 +607,7 @@ def create_or_update_pr(
     try:
         git_push(plan.context.repo_root, branch=feature_branch, set_upstream=True)
         log.success("Pushed to origin")
-    except Exception as exc:
+    except (CalledProcessError, OSError) as exc:
         log.error(f"Push failed: {exc}")
         return 1
 
@@ -635,7 +633,7 @@ def create_or_update_pr(
             )
             log.success(f"PR updated: {existing_pr_ref.url}")
             return 0
-        except Exception as exc:
+        except (CalledProcessError, ExternalToolMissingError, OSError) as exc:
             log.warning(f"PR update failed: {exc}")
             log.info(f"Changes were pushed. Update PR manually: {existing_pr_ref.url}")
             return 0
@@ -652,7 +650,7 @@ def create_or_update_pr(
         )
         log.success(f"PR created: {pr.url}")
         return 0
-    except Exception as exc:
+    except (CalledProcessError, ExternalToolMissingError, OSError) as exc:
         log.error(f"PR creation failed: {exc}")
         log.info(f"Branch {feature_branch} was pushed. Create PR manually.")
         return 1
@@ -753,7 +751,7 @@ def main(argv: list[str] | None = None) -> int:
             log.rule()
             log.success("Done!")
         return result
-    except Exception as exc:
+    except (CalledProcessError, OSError, OverlayToolsError, RuntimeError, ValueError) as exc:
         log.error(str(exc))
         return 1
     finally:
@@ -761,7 +759,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 log.step("branch", f"return to {plan.context.original_branch}")
                 git_checkout_branch(plan.context.original_branch, plan.context.repo_root)
-            except Exception as exc:
+            except (CalledProcessError, OSError) as exc:
                 log.error(
                     "Failed to return to branch "
                     f"{plan.context.original_branch}: {format_git_error(exc)}"

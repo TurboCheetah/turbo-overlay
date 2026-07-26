@@ -3,10 +3,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 
 def _get_rich() -> tuple[Any, ...] | None:
