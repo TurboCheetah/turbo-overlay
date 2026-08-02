@@ -22,6 +22,7 @@ S="${WORKDIR}/squashfs-root"
 LICENSE="MIT"
 SLOT="0"
 KEYWORDS="~amd64"
+REQUIRED_USE="elibc_glibc"
 RESTRICT="strip"
 QA_PREBUILT="opt/${PN}/*"
 
@@ -87,12 +88,12 @@ else
 	extra_flags+=(--ozone-platform-hint=auto)
 fi
 
-exec "${appdir}/t3-code-desktop" --no-sandbox "${extra_flags[@]}" "$@"
+exec "${appdir}/t3code" --no-sandbox "${extra_flags[@]}" "$@"
 EOF
 	dobin "${T}/t3code"
 	dosym t3code /usr/bin/t3-code-desktop
 
-	newicon -s 1024 "${DISTDIR}/${P}-icon.png" t3code.png
+	newicon -s 512 "${DISTDIR}/${P}-icon.png" t3code.png
 
 	cat > "${T}/t3code.desktop" <<'EOF' || die
 [Desktop Entry]
