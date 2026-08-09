@@ -9,6 +9,9 @@
   "labels": [
     "Meta: Dependencies"
   ],
+  "lockFileMaintenance": {
+    "enabled": true
+  },
   "schedule": [
     "before 12pm on Sunday"
   ],
