@@ -3,15 +3,11 @@
   "extends": [
     "config:recommended",
     "helpers:pinGitHubActionDigests",
-    "group:allNonMajor",
-    ":enableVulnerabilityAlerts"
+    "group:allNonMajor"
   ],
   "labels": [
     "Meta: Dependencies"
   ],
-  "lockFileMaintenance": {
-    "enabled": true
-  },
   "schedule": [
     "before 12pm on Sunday"
   ],
@@ -30,23 +26,6 @@
         "major"
       ],
       "automerge": false
-    },
-    {
-      "matchJsonata": [
-        "$exists(vulnerabilityFixVersion)"
-      ],
-      "addLabels": [
-        "security"
-      ],
-      "automerge": false
     }
-  ],
-  "osvVulnerabilityAlerts": true,
-  "vulnerabilityAlerts": {
-    "addLabels": [
-      "security"
-    ],
-    "automerge": false,
-    "vulnerabilityFixStrategy": "lowest"
-  }
+  ]
 }
