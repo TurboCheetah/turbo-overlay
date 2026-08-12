@@ -3,7 +3,8 @@
   "extends": [
     "config:recommended",
     "helpers:pinGitHubActionDigests",
-    "group:allNonMajor"
+    "group:allNonMajor",
+    ":enableVulnerabilityAlerts"
   ],
   "labels": [
     "Meta: Dependencies"
@@ -26,6 +27,28 @@
         "major"
       ],
       "automerge": false
+    },
+    {
+      "matchJsonata": [
+        "isVulnerabilityAlert = true"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "addLabels": [
+        "security"
+      ],
+      "automerge": true
     }
-  ]
+  ],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "addLabels": [
+      "security"
+    ],
+    "vulnerabilityFixStrategy": "lowest"
+  }
 }
