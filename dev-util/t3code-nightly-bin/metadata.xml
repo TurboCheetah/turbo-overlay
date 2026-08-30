@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Nightly builds of T3 Code, a minimal GUI for working with code
+		and AI coding agents. Tracks the upstream -nightly release tags
+		(prereleases); use dev-util/t3code-bin for stable builds.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">pingdotgg/t3code</remote-id>
+		<bugs-to>https://github.com/pingdotgg/t3code/issues</bugs-to>
+	</upstream>
+</pkgmetadata>
