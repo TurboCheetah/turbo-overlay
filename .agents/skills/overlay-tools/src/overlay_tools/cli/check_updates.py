@@ -28,13 +28,16 @@ from overlay_tools.core.update_sources import (
 )
 from overlay_tools.core.versions import compare_versions, upstream_to_gentoo
 
-CHANNEL_SUFFIXES = ("stable", "preview", "dev")
+CHANNEL_SUFFIXES = ("stable", "preview", "dev", "nightly")
+NIGHTLY_TAG_MARKER = "-nightly."
 
 
 def _derive_channel(my_pv: str | None) -> str | None:
     """Derive release channel from MY_PV value (e.g., '.stable_' -> 'stable')."""
     if not my_pv:
         return None
+    if NIGHTLY_TAG_MARKER in my_pv:
+        return "nightly"
     for ch in CHANNEL_SUFFIXES:
         if f".{ch}_" in my_pv:
             return ch
@@ -98,9 +101,9 @@ def check_channel_ebuild(
                     my_pv=my_pv,
                 )
         else:
-            cmp = compare_versions(current_version, source_release.version)
-            status = "update-available" if cmp < 0 else "up-to-date"
             gentoo_version = upstream_to_gentoo(source_release.version)
+            cmp = compare_versions(current_version, gentoo_version)
+            status = "update-available" if cmp < 0 else "up-to-date"
 
             return build_status(
                 category=category,
@@ -119,9 +122,9 @@ def check_channel_ebuild(
         try:
             release = github_client.get_latest_release(github_repo, channel=channel)
             if release:
-                cmp = compare_versions(current_version, release.version)
-                status = "update-available" if cmp < 0 else "up-to-date"
                 gentoo_version = upstream_to_gentoo(release.version)
+                cmp = compare_versions(current_version, gentoo_version)
+                status = "update-available" if cmp < 0 else "up-to-date"
 
                 return build_status(
                     category=category,

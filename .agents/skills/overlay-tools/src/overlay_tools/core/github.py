@@ -70,13 +70,16 @@ class GitHubClient:
         if cache_dir:
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_cache_path(self, repo: str) -> Path | None:
+    def _get_cache_path(self, repo: str, channel: str | None = None) -> Path | None:
         if not self.cache_dir:
             return None
-        return self.cache_dir / f"{repo.replace('/', '_')}.json"
+        key = repo.replace("/", "_")
+        if channel:
+            key = f"{key}.{channel}"
+        return self.cache_dir / f"{key}.json"
 
-    def _read_cache(self, repo: str) -> ReleaseInfo | None:
-        cache_path = self._get_cache_path(repo)
+    def _read_cache(self, repo: str, channel: str | None = None) -> ReleaseInfo | None:
+        cache_path = self._get_cache_path(repo, channel)
         if not cache_path or not cache_path.exists():
             return None
 
@@ -97,8 +100,8 @@ class GitHubClient:
         except (json.JSONDecodeError, KeyError, OSError):
             return None
 
-    def _write_cache(self, repo: str, info: ReleaseInfo) -> None:
-        cache_path = self._get_cache_path(repo)
+    def _write_cache(self, repo: str, info: ReleaseInfo, channel: str | None = None) -> None:
+        cache_path = self._get_cache_path(repo, channel)
         if not cache_path:
             return
         with contextlib.suppress(OSError):
@@ -107,6 +110,12 @@ class GitHubClient:
             )
 
     def get_latest_release(self, repo: str, channel: str | None = None) -> ReleaseInfo | None:
+        if channel is not None:
+            # Channel-aware: fetch recent releases and pick the latest matching
+            # this channel. Cache is keyed by channel so a nightly lookup never
+            # poisons the stable-channel result (or vice versa).
+            return self._get_latest_release_for_channel(repo, channel)
+
         cached = self._read_cache(repo)
         if cached:
             return cached
@@ -151,7 +160,9 @@ class GitHubClient:
             raise GitHubAPIError(f"Invalid JSON response for {repo}: {e}") from e
 
     def _get_latest_release_for_channel(self, repo: str, channel: str) -> ReleaseInfo | None:
-        tag_suffix = f".{channel}_"
+        # Nightly tags use a hyphen marker (e.g. 0.0.37-nightly.20260830.1227);
+        # other channels use a dot-suffix marker like .stable_ or .preview_.
+        tag_marker = "-nightly." if channel == "nightly" else f".{channel}_"
         url = f"{self.API_BASE}/repos/{repo}/releases?per_page=30"
         try:
             response = self.session.get(url, timeout=10)
@@ -172,13 +183,13 @@ class GitHubClient:
                 if release.get("draft"):
                     continue
                 tag = release.get("tag_name", "")
-                if tag_suffix in tag:
+                if tag_marker in tag:
                     info = ReleaseInfo(
                         tag=tag,
                         version=normalize_upstream_version(tag),
                         url=release.get("html_url", ""),
                     )
-                    self._write_cache(repo, info)
+                    self._write_cache(repo, info, channel=channel)
                     return info
 
             return None
