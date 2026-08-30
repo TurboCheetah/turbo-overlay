@@ -63,6 +63,26 @@ class TestGitHubClientChannelLookup:
         assert info.tag == "v0.0.37-nightly.20260831.0101"
         assert info.version == "0.0.37-nightly.20260831.0101"
 
+    def test_nightly_channel_sorts_numeric_boundary(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            # 0.0.10 is lexically smaller than 0.0.9; newest-selection must
+            # compare numerically so the newer 0.0.10 nightly wins.
+            return httpx.Response(
+                200,
+                json=[
+                    {"tag_name": "v0.0.9-nightly.20260830.1227", "draft": False},
+                    {"tag_name": "v0.0.10-nightly.20260831.0101", "draft": False},
+                ],
+            )
+
+        client = GitHubClient()
+        client.session = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        info = client._get_latest_release_for_channel("x/t3code", "nightly")
+
+        assert info is not None
+        assert info.tag == "v0.0.10-nightly.20260831.0101"
+        assert info.version == "0.0.10-nightly.20260831.0101"
+
     def test_nightly_channel_reads_channel_cache(self, tmp_path):
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()

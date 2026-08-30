@@ -10,7 +10,11 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-from overlay_tools.core.versions import compare_versions, normalize_upstream_version
+from overlay_tools.core.versions import (
+    compare_versions,
+    normalize_upstream_version,
+    upstream_to_gentoo,
+)
 
 GITHUB_REPO_RE = re.compile(r"github\.com/([^/]+/[^/]+)")
 CACHE_TTL_SECONDS = 1800
@@ -192,8 +196,17 @@ class GitHubClient:
                     url=release.get("html_url", ""),
                 )
                 # GitHub returns releases newest-first, but select the newest
-                # explicitly rather than trusting list order.
-                if best is None or compare_versions(best.version, info.version) < 0:
+                # explicitly rather than trusting list order. Compare in
+                # Gentoo space so numeric boundaries (0.0.9 -> 0.0.10) sort
+                # correctly instead of raw lexical order.
+                if (
+                    best is None
+                    or compare_versions(
+                        upstream_to_gentoo(best.version),
+                        upstream_to_gentoo(info.version),
+                    )
+                    < 0
+                ):
                     best = info
 
             if best is not None:
