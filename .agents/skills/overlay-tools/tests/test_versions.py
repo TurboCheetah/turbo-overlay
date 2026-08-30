@@ -142,6 +142,25 @@ class TestUpstreamToGentoo:
         result = upstream_to_gentoo("v0.2026.05.06.09.13.preview_00")
         assert result == "0.2026.05.06.09.13_pre00"
 
+    def test_converts_nightly_suffix(self):
+        result = upstream_to_gentoo("0.0.37-nightly.20260830.1227")
+        assert result == "0.0.37_pre202608301227"
+
+    def test_converts_nightly_with_v_prefix(self):
+        result = upstream_to_gentoo("v0.0.37-nightly.20260830.1227")
+        assert result == "0.0.37_pre202608301227"
+
+    def test_nightly_sorts_above_stable_base(self):
+        assert compare_versions("0.0.37_pre202608301227", "0.0.36") == 1
+
+    def test_nightly_sorts_below_future_stable(self):
+        assert compare_versions("0.0.37_pre202608301227", "0.0.37") == -1
+
+    def test_nightly_sorts_by_date_time(self):
+        older = "0.0.37_pre202608301227"
+        newer = "0.0.37_pre202608310101"
+        assert compare_versions(newer, older) == 1
+
 
 class TestGentooVersionToPep440:
     def test_alpha(self):

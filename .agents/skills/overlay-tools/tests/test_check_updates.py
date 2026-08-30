@@ -40,6 +40,93 @@ def write_ebuild(path: Path, *, homepage: str = "https://hayase.watch/") -> None
     )
 
 
+def write_nightly_ebuild(path: Path, *, version: str, my_pv: str) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "EAPI=8",
+                f'MY_PV="{my_pv}"',
+                'HOMEPAGE="https://t3.codes/"',
+                'SRC_URI="https://github.com/pingdotgg/t3code/releases/download/v${MY_PV}/T3-Code-${MY_PV}-x86_64.AppImage"',
+            ]
+        )
+    )
+
+
+class TestCheckChannelEbuildNightly:
+    def test_nightly_my_pv_derives_nightly_channel(self):
+        assert check_updates._derive_channel("0.0.37-nightly.20260830.1227") == "nightly"
+        assert check_updates._derive_channel("0.2026.06.03.09.49.stable_00") == "stable"
+
+    def test_nightly_github_release_reports_update(self, tmp_path: Path):
+        pkg_path = tmp_path / "dev-util" / "t3code-nightly-bin"
+        pkg_path.mkdir(parents=True)
+        ebuild_path = pkg_path / "t3code-nightly-bin-0.0.37_pre202608301227.ebuild"
+        write_nightly_ebuild(
+            ebuild_path,
+            version="0.0.37_pre202608301227",
+            my_pv="0.0.37-nightly.20260830.1227",
+        )
+        ebuild = EbuildName("t3code-nightly-bin", "0.0.37_pre202608301227", ebuild_path)
+        (pkg_path / "metadata.xml").write_text(
+            "<pkgmetadata><upstream>"
+            '<remote-id type="github">pingdotgg/t3code</remote-id>'
+            "</upstream></pkgmetadata>"
+        )
+
+        class FakeGitHubClient:
+            def get_latest_release(self, repo: str, channel: str | None = None):
+                assert repo == "pingdotgg/t3code"
+                assert channel == "nightly"
+                return ReleaseInfo(
+                    tag="v0.0.37-nightly.20260831.0101",
+                    version="0.0.37-nightly.20260831.0101",
+                    url="https://github.com/pingdotgg/t3code/releases/tag/v0.0.37-nightly.20260831.0101",
+                )
+
+        status = check_updates.check_channel_ebuild(
+            "dev-util", "t3code-nightly-bin", ebuild, pkg_path, FakeGitHubClient()
+        )
+
+        assert status.status == "update-available"
+        assert status.current_version == "0.0.37_pre202608301227"
+        assert status.latest_version == "0.0.37-nightly.20260831.0101"
+        assert status.gentoo_version == "0.0.37_pre202608310101"
+        assert status.github_repo == "pingdotgg/t3code"
+        assert status.my_pv == "0.0.37-nightly.20260830.1227"
+
+    def test_nightly_current_equal_reports_up_to_date(self, tmp_path: Path):
+        pkg_path = tmp_path / "dev-util" / "t3code-nightly-bin"
+        pkg_path.mkdir(parents=True)
+        ebuild_path = pkg_path / "t3code-nightly-bin-0.0.37_pre202608301227.ebuild"
+        write_nightly_ebuild(
+            ebuild_path,
+            version="0.0.37_pre202608301227",
+            my_pv="0.0.37-nightly.20260830.1227",
+        )
+        ebuild = EbuildName("t3code-nightly-bin", "0.0.37_pre202608301227", ebuild_path)
+        (pkg_path / "metadata.xml").write_text(
+            "<pkgmetadata><upstream>"
+            '<remote-id type="github">pingdotgg/t3code</remote-id>'
+            "</upstream></pkgmetadata>"
+        )
+
+        class FakeGitHubClient:
+            def get_latest_release(self, repo: str, channel: str | None = None):
+                return ReleaseInfo(
+                    tag="v0.0.37-nightly.20260830.1227",
+                    version="0.0.37-nightly.20260830.1227",
+                    url="https://github.com/pingdotgg/t3code/releases/tag/v0.0.37-nightly.20260830.1227",
+                )
+
+        status = check_updates.check_channel_ebuild(
+            "dev-util", "t3code-nightly-bin", ebuild, pkg_path, FakeGitHubClient()
+        )
+
+        assert status.status == "up-to-date"
+        assert status.gentoo_version == "0.0.37_pre202608301227"
+
+
 class TestCheckChannelEbuildUpdateSource:
     def test_returns_update_available_for_plugin_release(self, monkeypatch, tmp_path: Path):
         pkg_path = tmp_path / "media-video" / "hayase-bin"
