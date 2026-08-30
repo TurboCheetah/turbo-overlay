@@ -28,15 +28,12 @@ class TestGitHubClientChannelLookup:
     def test_nightly_channel_finds_newest_nightly_tag(self):
         def handler(request: httpx.Request) -> httpx.Response:
             assert "api.github.com" in str(request.url)
+            # Older nightly first, with a non-nightly stable tag in between.
+            # A "first marker match" implementation would return 20260830;
+            # only an explicit newest-selection pass returns 20260831.
             return httpx.Response(
                 200,
                 json=[
-                    {
-                        "tag_name": "v0.0.37-nightly.20260831.0101",
-                        "html_url": "https://github.com/x/t3code/releases/tag/v0.0.37-nightly.20260831.0101",
-                        "draft": False,
-                        "prerelease": True,
-                    },
                     {
                         "tag_name": "v0.0.37-nightly.20260830.1227",
                         "html_url": "https://github.com/x/t3code/releases/tag/v0.0.37-nightly.20260830.1227",
@@ -49,6 +46,12 @@ class TestGitHubClientChannelLookup:
                         "draft": False,
                         "prerelease": False,
                     },
+                    {
+                        "tag_name": "v0.0.37-nightly.20260831.0101",
+                        "html_url": "https://github.com/x/t3code/releases/tag/v0.0.37-nightly.20260831.0101",
+                        "draft": False,
+                        "prerelease": True,
+                    },
                 ],
             )
 
@@ -59,6 +62,32 @@ class TestGitHubClientChannelLookup:
         assert info is not None
         assert info.tag == "v0.0.37-nightly.20260831.0101"
         assert info.version == "0.0.37-nightly.20260831.0101"
+
+    def test_nightly_channel_reads_channel_cache(self, tmp_path):
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        client = GitHubClient(cache_dir=cache_dir)
+        client._write_cache(
+            "x/t3code",
+            ReleaseInfo(
+                tag="v0.0.37-nightly.20260830.1227",
+                version="0.0.37-nightly.20260830.1227",
+                url="https://github.com/x/t3code/releases/tag/v0.0.37-nightly.20260830.1227",
+            ),
+            channel="nightly",
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise AssertionError(
+                "channel lookup must not hit the API when the channel cache is fresh"
+            )
+
+        client.session = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        info = client.get_latest_release("x/t3code", channel="nightly")
+
+        assert info is not None
+        assert info.tag == "v0.0.37-nightly.20260830.1227"
+        assert info.version == "0.0.37-nightly.20260830.1227"
 
     def test_stable_channel_uses_dot_suffix_marker(self):
         def handler(request: httpx.Request) -> httpx.Response:

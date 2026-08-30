@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-from overlay_tools.core.versions import normalize_upstream_version
+from overlay_tools.core.versions import compare_versions, normalize_upstream_version
 
 GITHUB_REPO_RE = re.compile(r"github\.com/([^/]+/[^/]+)")
 CACHE_TTL_SECONDS = 1800
@@ -122,10 +122,6 @@ class GitHubClient:
 
         url = f"{self.API_BASE}/repos/{repo}/releases/latest"
 
-        if channel is not None:
-            # Channel-aware: fetch recent releases and pick the latest matching this channel
-            return self._get_latest_release_for_channel(repo, channel)
-
         try:
             response = self.session.get(url, timeout=10)
 
@@ -160,6 +156,10 @@ class GitHubClient:
             raise GitHubAPIError(f"Invalid JSON response for {repo}: {e}") from e
 
     def _get_latest_release_for_channel(self, repo: str, channel: str) -> ReleaseInfo | None:
+        cached = self._read_cache(repo, channel=channel)
+        if cached:
+            return cached
+
         # Nightly tags use a hyphen marker (e.g. 0.0.37-nightly.20260830.1227);
         # other channels use a dot-suffix marker like .stable_ or .preview_.
         tag_marker = "-nightly." if channel == "nightly" else f".{channel}_"
@@ -179,20 +179,26 @@ class GitHubClient:
             response.raise_for_status()
             releases = response.json()
 
+            best: ReleaseInfo | None = None
             for release in releases:
                 if release.get("draft"):
                     continue
                 tag = release.get("tag_name", "")
-                if tag_marker in tag:
-                    info = ReleaseInfo(
-                        tag=tag,
-                        version=normalize_upstream_version(tag),
-                        url=release.get("html_url", ""),
-                    )
-                    self._write_cache(repo, info, channel=channel)
-                    return info
+                if tag_marker not in tag:
+                    continue
+                info = ReleaseInfo(
+                    tag=tag,
+                    version=normalize_upstream_version(tag),
+                    url=release.get("html_url", ""),
+                )
+                # GitHub returns releases newest-first, but select the newest
+                # explicitly rather than trusting list order.
+                if best is None or compare_versions(best.version, info.version) < 0:
+                    best = info
 
-            return None
+            if best is not None:
+                self._write_cache(repo, best, channel=channel)
+            return best
 
         except httpx.HTTPError as e:
             raise GitHubAPIError(f"API error for {repo}: {e}") from e
