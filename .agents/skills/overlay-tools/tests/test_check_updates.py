@@ -87,6 +87,48 @@ class TestSelectChannel:
         assert check_updates.select_channel([]) is None
 
 
+def make_overlay(tmp_path: Path) -> Path:
+    root = tmp_path / "overlay"
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "repo_name").write_text("turbo-overlay\n")
+    return root
+
+
+class TestFilterPackagesByChannel:
+    def test_include_keeps_only_matching_channel(self, tmp_path: Path):
+        root = make_overlay(tmp_path)
+        write_pkg_ebuild(root / "dev-util/t3code-bin/t3code-bin-0.0.40.ebuild")
+        write_pkg_ebuild(
+            root / "dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.37_pre202608301227.ebuild",
+            my_pv="0.0.37-nightly.20260830.1227",
+        )
+        packages = check_updates.find_packages(root)
+
+        kept = check_updates.filter_packages_by_channel(packages, include=["nightly"])
+
+        assert [p.atom for p in kept] == ["dev-util/t3code-nightly-bin"]
+
+    def test_exclude_drops_matching_channel_and_keeps_unchanneled(self, tmp_path: Path):
+        root = make_overlay(tmp_path)
+        write_pkg_ebuild(root / "dev-util/t3code-bin/t3code-bin-0.0.40.ebuild")
+        write_pkg_ebuild(
+            root / "dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.37_pre202608301227.ebuild",
+            my_pv="0.0.37-nightly.20260830.1227",
+        )
+        packages = check_updates.find_packages(root)
+
+        kept = check_updates.filter_packages_by_channel(packages, exclude=["nightly"])
+
+        assert [p.atom for p in kept] == ["dev-util/t3code-bin"]
+
+    def test_no_filters_returns_everything(self, tmp_path: Path):
+        root = make_overlay(tmp_path)
+        write_pkg_ebuild(root / "dev-util/t3code-bin/t3code-bin-0.0.40.ebuild")
+        packages = check_updates.find_packages(root)
+
+        assert check_updates.filter_packages_by_channel(packages) == packages
+
+
 class TestCheckChannelEbuildNightly:
     def test_nightly_my_pv_derives_nightly_channel(self):
         assert check_updates._derive_channel("0.0.37-nightly.20260830.1227") == "nightly"

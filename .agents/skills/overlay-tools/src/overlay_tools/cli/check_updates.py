@@ -14,7 +14,7 @@ from overlay_tools.core.github import (
     extract_github_repo_from_path,
 )
 from overlay_tools.core.logging import Logger, set_logger
-from overlay_tools.core.overlay import find_overlay_root, find_packages
+from overlay_tools.core.overlay import PackageRef, find_overlay_root, find_packages
 from overlay_tools.core.report import (
     PackageStatus,
     build_status,
@@ -243,6 +243,35 @@ def check_package(
 
     _, best_ebuild = selected
     return check_channel_ebuild(category, name, best_ebuild, pkg_path, github_client)
+
+
+def filter_packages_by_channel(
+    packages: list[PackageRef],
+    *,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> list[PackageRef]:
+    """Filter packages by the channel they would be checked on.
+
+    Channel-less packages (no MY_PV channel marker) have channel None: they are
+    dropped by `include` and kept by `exclude`.
+    """
+    include_set = set(include or ())
+    exclude_set = set(exclude or ())
+    if not include_set and not exclude_set:
+        return list(packages)
+
+    kept: list[PackageRef] = []
+    for pkg in packages:
+        selected = select_channel(find_ebuilds(pkg.path))
+        channel = selected[0] if selected else None
+        if include_set and channel not in include_set:
+            continue
+        if channel in exclude_set:
+            continue
+        kept.append(pkg)
+
+    return kept
 
 
 def main(argv: list[str] | None = None) -> int:
