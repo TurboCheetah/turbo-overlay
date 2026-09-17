@@ -76,7 +76,7 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 
 ### Automated Updates (GitHub Actions)
 
-The workflow at `.github/workflows/check-updates.yml` runs nightly (06:37 UTC) to check for updates and create PRs automatically.
+The workflow at `.github/workflows/check-updates.yml` runs on two schedules: daily (06:37 UTC) for nightly-channel packages (`check-updates --channel nightly`) and weekly on Sunday (07:07 UTC) for every other channel (`--exclude-channel nightly`). A manual dispatch checks all packages unless the `channel` / `exclude_channel` inputs are supplied.
 
 ### Linting & Type Checking
 
