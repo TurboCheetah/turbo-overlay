@@ -2,10 +2,12 @@ name: Check Updates
 
 on:
   schedule:
-    # Nightly check (was weekly: "0 6 * * 0"). 06:37 UTC rather than 06:00:
-    # GitHub queues scheduled runs at the top of the hour and can delay them
-    # by hours, so use an off-peak minute.
+    # Daily: nightly-channel packages only (see "Resolve channel filter").
     - cron: "37 6 * * *"
+    # Weekly (Sunday): everything except the nightly channel. A different
+    # minute than the daily run: "37 6 * * *" already covers Sunday, so a
+    # matching weekly expression would fire a second, concurrent run.
+    - cron: "7 7 * * 0"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -14,6 +16,14 @@ on:
         default: false
       package:
         description: "Specific package to check (e.g., net-im/goofcord)"
+        type: string
+        required: false
+      channel:
+        description: "Only check packages on this channel (e.g. nightly, stable)"
+        type: string
+        required: false
+      exclude_channel:
+        description: "Skip packages on this channel (e.g. nightly)"
         type: string
         required: false
 
@@ -44,10 +54,41 @@ jobs:
         with:
           version: "latest"
 
+      - name: Resolve channel filter
+        id: filter
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_EXCLUDE_CHANNEL: ${{ inputs.exclude_channel }}
+        run: |
+          set -euo pipefail
+
+          ARGS=""
+          case "${SCHEDULE}" in
+            "37 6 * * *") ARGS="--channel nightly" ;;
+            "7 7 * * 0") ARGS="--exclude-channel nightly" ;;
+            "") ;;  # workflow_dispatch: filters come from the inputs below
+            *)
+              echo "::error::Unrecognised schedule '${SCHEDULE}'. Update the channel mapping in the 'Resolve channel filter' step."
+              exit 1
+              ;;
+          esac
+
+          if [ -n "${INPUT_CHANNEL}" ]; then
+            ARGS="--channel ${INPUT_CHANNEL}"
+          fi
+          if [ -n "${INPUT_EXCLUDE_CHANNEL}" ]; then
+            ARGS="--exclude-channel ${INPUT_EXCLUDE_CHANNEL}"
+          fi
+
+          echo "Channel filter: ${ARGS:-<none> (all packages)}"
+          echo "args=${ARGS}" >> "$GITHUB_OUTPUT"
+
       - name: Check for updates
         id: check
         env:
           PACKAGE: ${{ inputs.package }}
+          CHANNEL_ARGS: ${{ steps.filter.outputs.args }}
         run: |
           set -euo pipefail
 
@@ -56,8 +97,11 @@ jobs:
             ARGS="--package $PACKAGE"
           fi
 
+          echo "Running: .agents/skills/overlay-tools/bin/check-updates $ARGS ${CHANNEL_ARGS} --json"
+
           set +e
-          .agents/skills/overlay-tools/bin/check-updates $ARGS --json > updates.json
+          # shellcheck disable=SC2086  # intentional word splitting of flag strings
+          .agents/skills/overlay-tools/bin/check-updates $ARGS ${CHANNEL_ARGS} --json > updates.json
           status=$?
           set -e
 
