@@ -29,6 +29,12 @@ Scan packages for available upstream updates.
 
 # JSON output for scripting
 .agents/skills/overlay-tools/bin/check-updates --json
+
+# Only nightly-channel packages (the daily CI run)
+.agents/skills/overlay-tools/bin/check-updates --channel nightly
+
+# Everything except nightly-channel packages (the weekly CI run)
+.agents/skills/overlay-tools/bin/check-updates --exclude-channel nightly
 ```
 
 If a package is reported as `manual-check`, see
@@ -39,9 +45,18 @@ If a package is reported as `manual-check`, see
 | Flag | Description |
 |------|-------------|
 | `-p, --package CATEGORY/NAME` | Check specific package only |
+| `--channel CHANNEL` | Only check packages whose selected channel matches (repeatable) |
+| `--exclude-channel CHANNEL` | Skip packages whose selected channel matches (repeatable) |
 | `--json` | Output JSON format |
 | `-v, --verbose` | Show detailed progress |
 | `--overlay-path PATH` | Path to overlay (default: current directory) |
+
+`--channel` and `--exclude-channel` are mutually exclusive. Both filter on the
+channel a package *would be checked on* — derived from the `MY_PV` of its
+highest-versioned ebuild: `stable`, `preview`, `dev`, `nightly`, or none.
+Packages with no channel marker (no `MY_PV` channel suffix) have channel none,
+so `--channel X` drops them and `--exclude-channel X` keeps them. A filter that
+matches no package warns on stderr and exits `2`.
 
 **Exit Codes:** `0` = updates available, `1` = errors, `2` = all up-to-date
 

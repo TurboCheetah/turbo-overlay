@@ -18,6 +18,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ```bash
 .agents/skills/overlay-tools/bin/check-updates
+
+# Restrict by release channel (derived from MY_PV)
+.agents/skills/overlay-tools/bin/check-updates --channel nightly
+.agents/skills/overlay-tools/bin/check-updates --exclude-channel nightly
 ```
 
 ### Bump Package Version
