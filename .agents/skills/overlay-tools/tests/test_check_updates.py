@@ -53,6 +53,40 @@ def write_nightly_ebuild(path: Path, *, version: str, my_pv: str) -> None:
     )
 
 
+def write_pkg_ebuild(path: Path, *, my_pv: str | None = None) -> None:
+    lines = ["EAPI=8"]
+    if my_pv is not None:
+        lines.append(f'MY_PV="{my_pv}"')
+    lines.append(
+        'SRC_URI="https://github.com/pingdotgg/t3code/releases/download/v${MY_PV}/x.AppImage"'
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n")
+
+
+class TestSelectChannel:
+    def test_prefers_channel_with_highest_version(self, tmp_path: Path):
+        pkg_path = tmp_path / "x11-terms" / "warp"
+        write_pkg_ebuild(
+            pkg_path / "warp-0.2026.05.20.09.21_pre00.ebuild",
+            my_pv="0.2026.05.20.09.21.preview_00",
+        )
+        write_pkg_ebuild(
+            pkg_path / "warp-0.2026.06.03.09.49_p00.ebuild",
+            my_pv="0.2026.06.03.09.49.stable_00",
+        )
+
+        selected = check_updates.select_channel(check_updates.find_ebuilds(pkg_path))
+
+        assert selected is not None
+        channel, ebuild = selected
+        assert channel == "stable"
+        assert ebuild.pv == "0.2026.06.03.09.49_p00"
+
+    def test_returns_none_for_empty_ebuild_list(self):
+        assert check_updates.select_channel([]) is None
+
+
 class TestCheckChannelEbuildNightly:
     def test_nightly_my_pv_derives_nightly_channel(self):
         assert check_updates._derive_channel("0.0.37-nightly.20260830.1227") == "nightly"

@@ -58,6 +58,21 @@ def _group_ebuilds_by_channel(ebuilds: list[EbuildName]) -> dict[str | None, Ebu
     }
 
 
+def select_channel(ebuilds: list[EbuildName]) -> tuple[str | None, EbuildName] | None:
+    """Select the channel Portage would pick: the one whose latest ebuild is highest.
+
+    Returns the (channel, ebuild) pair, or None when there are no ebuilds.
+    """
+    channels = _group_ebuilds_by_channel(ebuilds)
+    if not channels:
+        return None
+
+    return max(
+        channels.items(),
+        key=cmp_to_key(lambda a, b: compare_versions(a[1].pv, b[1].pv)),
+    )  # type: ignore[arg-type]
+
+
 def check_channel_ebuild(
     category: str,
     name: str,
@@ -213,8 +228,11 @@ def check_package(
             error_message="No ebuilds found",
         )
 
-    channels = _group_ebuilds_by_channel(ebuilds)
-    if not channels:
+    # Pick the channel whose latest ebuild is the overall highest version.
+    # This is the ebuild Portage would select by default — check *that*
+    # channel against upstream.
+    selected = select_channel(ebuilds)
+    if selected is None:
         return build_status(
             category=category,
             name=name,
@@ -223,14 +241,7 @@ def check_package(
             error_message="No channel groups found",
         )
 
-    # Pick the channel whose latest ebuild is the overall highest version.
-    # This is the ebuild Portage would select by default — check *that*
-    # channel against upstream.
-    best_channel = max(
-        channels.items(),
-        key=cmp_to_key(lambda a, b: compare_versions(a[1].pv, b[1].pv)),
-    )  # type: ignore[arg-type]
-    _, best_ebuild = best_channel
+    _, best_ebuild = selected
     return check_channel_ebuild(category, name, best_ebuild, pkg_path, github_client)
 
 
