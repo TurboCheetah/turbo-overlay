@@ -76,7 +76,7 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 
 ### Automated Updates (GitHub Actions)
 
-The workflow at `.github/workflows/check-updates.yml` runs weekly to check for updates and create PRs automatically.
+The workflow at `.github/workflows/check-updates.yml` runs nightly (06:37 UTC) to check for updates and create PRs automatically.
 
 ### Linting & Type Checking
 

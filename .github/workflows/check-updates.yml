@@ -2,7 +2,10 @@ name: Check Updates
 
 on:
   schedule:
-    - cron: "0 6 * * 0"
+    # Nightly check (was weekly: "0 6 * * 0"). 06:37 UTC rather than 06:00:
+    # GitHub queues scheduled runs at the top of the hour and can delay them
+    # by hours, so use an off-peak minute.
+    - cron: "37 6 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
