@@ -285,6 +285,20 @@ def main(argv: list[str] | None = None) -> int:
         metavar="CATEGORY/NAME",
         help="Check specific package only",
     )
+    channel_group = parser.add_mutually_exclusive_group()
+    channel_group.add_argument(
+        "--channel",
+        action="append",
+        metavar="CHANNEL",
+        help="Only check packages whose selected channel matches (repeatable)",
+    )
+    channel_group.add_argument(
+        "--exclude-channel",
+        action="append",
+        metavar="CHANNEL",
+        dest="exclude_channel",
+        help="Skip packages whose selected channel matches (repeatable)",
+    )
     parser.add_argument(
         "--json",
         action="store_true",
@@ -327,6 +341,22 @@ def main(argv: list[str] | None = None) -> int:
         packages = [p for p in packages if p.atom == args.package]
         if not packages:
             log.warning(f"Package '{args.package}' not found")
+
+    if args.channel or args.exclude_channel:
+        total_before = len(packages)
+        packages = filter_packages_by_channel(
+            packages, include=args.channel, exclude=args.exclude_channel
+        )
+        if not packages:
+            # Not log.warning(): the Logger suppresses everything in --json mode,
+            # which is exactly how CI invokes this.
+            print(
+                "warning: channel filter matched no packages "
+                f"(include={','.join(args.channel or []) or '-'}, "
+                f"exclude={','.join(args.exclude_channel or []) or '-'}); "
+                f"{total_before} package(s) skipped",
+                file=sys.stderr,
+            )
 
     results: list[PackageStatus] = []
 

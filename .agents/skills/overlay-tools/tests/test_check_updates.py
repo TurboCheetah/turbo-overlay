@@ -1,4 +1,8 @@
+import json
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 
 from overlay_tools.cli import check_updates
 from overlay_tools.core.ebuilds import EbuildName
@@ -311,3 +315,96 @@ class TestCheckChannelEbuildUpdateSource:
         assert status.status == "update-available"
         assert status.latest_version == "6.4.61"
         assert status.custom_url == "https://example.invalid/latest"
+
+
+class FakeGitHubClient:
+    """Records (repo, channel) lookups; reports an update on the nightly channel.
+
+    main() constructs its own client instance, so tests cannot reach that object:
+    record on the class and reset the list explicitly in each test.
+    """
+
+    calls: ClassVar[list[tuple[str, str | None]]] = []
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def get_latest_release(self, repo: str, channel: str | None = None):
+        FakeGitHubClient.calls.append((repo, channel))
+        if channel == "nightly":
+            return ReleaseInfo(
+                tag="v0.0.43-nightly.20260917.1851",
+                version="0.0.43-nightly.20260917.1851",
+                url="https://github.com/pingdotgg/t3code/releases/tag/v0.0.43-nightly.20260917.1851",
+            )
+        return ReleaseInfo(
+            tag="v0.0.40",
+            version="0.0.40",
+            url="https://github.com/pingdotgg/t3code/releases/tag/v0.0.40",
+        )
+
+
+def write_two_channel_overlay(root: Path) -> None:
+    write_pkg_ebuild(root / "dev-util/t3code-bin/t3code-bin-0.0.40.ebuild")
+    write_pkg_ebuild(
+        root / "dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.37_pre202608301227.ebuild",
+        my_pv="0.0.37-nightly.20260830.1227",
+    )
+
+
+class TestChannelFilterCli:
+    def test_channel_nightly_checks_only_nightly_packages(self, monkeypatch, capsys, tmp_path):
+        root = make_overlay(tmp_path)
+        write_two_channel_overlay(root)
+        FakeGitHubClient.calls = []
+        monkeypatch.setattr(check_updates, "GitHubClient", FakeGitHubClient)
+
+        rc = check_updates.main(["--overlay-path", str(root), "--json", "--channel", "nightly"])
+        out = json.loads(capsys.readouterr().out)
+
+        assert rc == 0  # nightly fake reports an update
+        assert [p["name"] for p in out] == ["t3code-nightly-bin"]
+        assert FakeGitHubClient.calls == [("pingdotgg/t3code", "nightly")]
+
+    def test_exclude_channel_nightly_checks_everything_else(self, monkeypatch, capsys, tmp_path):
+        root = make_overlay(tmp_path)
+        write_two_channel_overlay(root)
+        FakeGitHubClient.calls = []
+        monkeypatch.setattr(check_updates, "GitHubClient", FakeGitHubClient)
+
+        rc = check_updates.main(
+            ["--overlay-path", str(root), "--json", "--exclude-channel", "nightly"]
+        )
+        out = json.loads(capsys.readouterr().out)
+
+        assert rc == 2  # only t3code-bin checked, and it is up to date
+        assert [p["name"] for p in out] == ["t3code-bin"]
+        assert FakeGitHubClient.calls == [("pingdotgg/t3code", None)]
+
+    def test_channel_and_exclude_channel_are_mutually_exclusive(self, tmp_path: Path):
+        root = make_overlay(tmp_path)
+        with pytest.raises(SystemExit) as excinfo:
+            check_updates.main(
+                [
+                    "--overlay-path",
+                    str(root),
+                    "--channel",
+                    "nightly",
+                    "--exclude-channel",
+                    "nightly",
+                ]
+            )
+        assert excinfo.value.code == 2  # argparse usage error
+
+    def test_filter_matching_nothing_warns_and_exits_2(self, monkeypatch, capsys, tmp_path):
+        root = make_overlay(tmp_path)
+        write_pkg_ebuild(root / "dev-util/t3code-bin/t3code-bin-0.0.40.ebuild")
+        FakeGitHubClient.calls = []
+        monkeypatch.setattr(check_updates, "GitHubClient", FakeGitHubClient)
+
+        rc = check_updates.main(["--overlay-path", str(root), "--json", "--channel", "nightly"])
+        captured = capsys.readouterr()
+
+        assert rc == 2
+        assert json.loads(captured.out) == []
+        assert "channel filter matched no packages" in captured.err
