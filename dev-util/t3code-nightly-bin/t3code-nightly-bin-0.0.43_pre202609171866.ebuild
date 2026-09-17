@@ -5,7 +5,7 @@ EAPI=8
 
 # Raw upstream nightly tag, e.g. 0.0.37-nightly.20260830.1227.
 # PV is the Gentoo-form date+time snapshot (0.0.37_preYYYYMMDDHHMM).
-MY_PV="0.0.39-nightly.20260906.1293"
+MY_PV="0.0.43-nightly.20260917.1866"
 APPIMAGE_NAME="T3-Code-${MY_PV}-x86_64.AppImage"
 T3CODE_COMMIT="876bbd715ae6aa8e1d663455747e17c92e0a287c"
 
