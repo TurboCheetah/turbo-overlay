@@ -3,7 +3,13 @@
 
 EAPI=8
 
-inherit unpacker desktop xdg
+CHROMIUM_LANGS="
+	af am ar bg bn ca cs da de el en-GB en-US es es-419 et fa fi fil fr gu he hi
+	hr hu id it ja kn ko lt lv ml mr ms nb nl pl pt-BR pt-PT ro ru sk sl sr sv
+	sw ta te th tr uk ur vi zh-CN zh-TW
+"
+
+inherit chromium-2 desktop linux-info unpacker xdg
 
 DESCRIPTION="Highly configurable and privacy minded Discord client"
 HOMEPAGE="https://github.com/Milkshiift/GoofCord"
@@ -15,8 +21,7 @@ SLOT="0"
 KEYWORDS="~amd64"
 REQUIRED_USE="elibc_glibc"
 
-RESTRICT="strip"
-QA_PREBUILT="opt/GoofCord/*"
+RESTRICT="bindist mirror strip test"
 
 RDEPEND="
 	>=app-accessibility/at-spi2-core-2.46.0:2
@@ -27,63 +32,72 @@ RDEPEND="
 	dev-libs/nss
 	dev-libs/wayland
 	media-libs/alsa-lib
-	media-libs/libglvnd
-	media-libs/mesa
+	media-libs/fontconfig
+	media-libs/mesa[gbm(+)]
 	net-print/cups
 	sys-apps/dbus
 	sys-apps/util-linux
-	virtual/udev
+	sys-libs/glibc
 	x11-libs/cairo
+	x11-libs/libdrm
 	x11-libs/gdk-pixbuf:2
 	x11-libs/gtk+:3
-	x11-libs/libdrm
-	x11-libs/libnotify
 	x11-libs/libX11
-	x11-libs/libxcb
 	x11-libs/libXcomposite
-	x11-libs/libXcursor
 	x11-libs/libXdamage
 	x11-libs/libXext
 	x11-libs/libXfixes
-	x11-libs/libXi
-	x11-libs/libxkbcommon
 	x11-libs/libXrandr
-	x11-libs/libXrender
-	x11-libs/libXScrnSaver
-	x11-libs/libxshmfence
-	x11-libs/libXtst
+	x11-libs/libxcb
+	x11-libs/libxkbcommon
 	x11-libs/pango
 	x11-misc/xdg-utils
 "
+
+DESTDIR="/opt/GoofCord"
+
+QA_PREBUILT="*"
+
+CONFIG_CHECK="~USER_NS"
 
 src_unpack() {
 	unpacker_src_unpack
 }
 
-src_install() {
-	insinto /opt/GoofCord
-	doins -r opt/GoofCord/*
-	dosym -r /opt/GoofCord/goofcord /usr/bin/goofcord
-	fperms 0755 \
-		/opt/GoofCord/goofcord \
-		/opt/GoofCord/chrome_crashpad_handler \
-		/opt/GoofCord/resources/goofbind \
-		/opt/GoofCord/resources/patchcord
-	fperms 4755 /opt/GoofCord/chrome-sandbox
+src_prepare() {
+	pushd "opt/GoofCord/locales" >/dev/null || die
+	chromium_remove_language_paks
+	popd >/dev/null || die
+}
 
-	domenu "${WORKDIR}/usr/share/applications/goofcord.desktop" || die "Failed to install .desktop file"
+src_configure() {
+	chromium_suid_sandbox_check_kernel_config
+}
+
+src_install() {
+	insinto "${DESTDIR}"
+	doins -r opt/GoofCord/*
+	dosym -r "${DESTDIR}/goofcord" /usr/bin/goofcord
+
+	fperms 0755 \
+		"${DESTDIR}/goofcord" \
+		"${DESTDIR}/chrome_crashpad_handler" \
+		"${DESTDIR}/resources/goofbind" \
+		"${DESTDIR}/resources/patchcord"
+
+	# Match GURU vesktop-bin / gentoo discord: setuid sandbox via 4711.
+	fowners root "${DESTDIR}/chrome-sandbox"
+	fperms 4711 "${DESTDIR}/chrome-sandbox"
+
+	domenu "${WORKDIR}/usr/share/applications/goofcord.desktop" || die
 	insinto /usr/share/icons/hicolor
 	doins -r usr/share/icons/hicolor/*
 }
 
 pkg_postinst() {
-	xdg_desktop_database_update
-	xdg_mimeinfo_database_update
-	xdg_icon_cache_update
+	xdg_pkg_postinst
 }
 
 pkg_postrm() {
-	xdg_desktop_database_update
-	xdg_mimeinfo_database_update
-	xdg_icon_cache_update
+	xdg_pkg_postrm
 }

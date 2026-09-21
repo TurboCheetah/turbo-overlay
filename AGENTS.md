@@ -460,8 +460,11 @@ turbo-overlay/
 
 ## Known Issues / Deferred Work
 
-### Deferred refactors
-- **Electron `.deb` packages** (`net-im/goofcord`, `media-video/hayase-bin`): duplicated install/RDEPEND blocks could share a small eclass in a future PR.
+### Electron `.deb` packaging
+- **net-im/goofcord** and **media-video/hayase-bin** follow the GURU/gentoo
+  `chromium-2` template (as used by `net-im/discord` and GURU
+  `net-im/vesktop-bin`): locale pruning, `CONFIG_CHECK`, setuid sandbox via
+  `4711`, and `QA_PREBUILT="*"`. No shared Electron eclass.
 
 ### Migrations
 - **deprecated/vesktop-bin** was removed. Users should install `net-im/vesktop` from the GURU overlay (see `README.md`).
