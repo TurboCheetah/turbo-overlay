@@ -7,19 +7,13 @@ EAPI=8
 # PV is the Gentoo-form date+time snapshot (0.0.37_preYYYYMMDDHHMM).
 MY_PV="0.0.43-nightly.20260921.2058"
 APPIMAGE_NAME="T3-Code-${MY_PV}-x86_64.AppImage"
-T3CODE_COMMIT="876bbd715ae6aa8e1d663455747e17c92e0a287c"
 
 inherit desktop xdg
 
 DESCRIPTION="Desktop app for working with code and AI coding agents (nightly build)"
 HOMEPAGE="https://t3.codes https://github.com/pingdotgg/t3code"
-SRC_URI="
-	https://github.com/pingdotgg/t3code/releases/download/v${MY_PV}/${APPIMAGE_NAME}
-	https://raw.githubusercontent.com/pingdotgg/t3code/${T3CODE_COMMIT}/apps/desktop/resources/icon.png
-		-> ${P}-icon.png
-	https://raw.githubusercontent.com/pingdotgg/t3code/${T3CODE_COMMIT}/LICENSE
-		-> ${P}-LICENSE
-"
+SRC_URI="https://github.com/pingdotgg/t3code/releases/download/v${MY_PV}/${APPIMAGE_NAME}"
+
 S="${WORKDIR}/squashfs-root"
 
 LICENSE="MIT"
@@ -41,7 +35,7 @@ RDEPEND="
 	net-print/cups
 	sys-apps/dbus
 	sys-fs/fuse:0
-	virtual/libudev
+	virtual/udev
 	virtual/zlib
 	x11-libs/cairo
 	x11-libs/gdk-pixbuf:2
@@ -63,6 +57,26 @@ src_unpack() {
 	cp "${DISTDIR}/${APPIMAGE_NAME}" "${WORKDIR}/${APPIMAGE_NAME}" || die
 	chmod +x "${WORKDIR}/${APPIMAGE_NAME}" || die
 	"${WORKDIR}/${APPIMAGE_NAME}" --appimage-extract >/dev/null || die
+}
+
+t3code_install_icon() {
+	local icon
+
+	icon=$(find "${S}" -path '*/resources/icon.png' -print -quit)
+	[[ -n ${icon} ]] || icon=$(find "${S}" -name 't3code.png' -print -quit)
+	[[ -n ${icon} ]] || die "Could not locate application icon in ${APPIMAGE_NAME}"
+
+	newicon -s 512 "${icon}" t3code.png
+}
+
+t3code_install_license() {
+	local license
+
+	license=$(find "${S}" -maxdepth 2 -name 'LICENSE' -print -quit)
+	[[ -n ${license} ]] || die "Could not locate LICENSE in ${APPIMAGE_NAME}"
+
+	insinto /usr/share/licenses/${PN}
+	newins "${license}" LICENSE
 }
 
 src_install() {
@@ -98,7 +112,7 @@ EOF
 	dobin "${T}/t3code"
 	dosym t3code /usr/bin/t3-code-desktop
 
-	newicon -s 512 "${DISTDIR}/${P}-icon.png" t3code.png
+	t3code_install_icon
 
 	cat > "${T}/t3code.desktop" <<'EOF' || die
 [Desktop Entry]
@@ -114,8 +128,7 @@ Categories=Development;
 EOF
 	domenu "${T}/t3code.desktop" || die
 
-	insinto /usr/share/licenses/${PN}
-	newins "${DISTDIR}/${P}-LICENSE" LICENSE
+	t3code_install_license
 }
 
 pkg_postinst() {

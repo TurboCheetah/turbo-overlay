@@ -14,6 +14,7 @@ LICENSE="MIT"
 SLOT="0"
 KEYWORDS="~amd64"
 
+# Upstream .deb is a prebuilt binary; mirror/bindist match other *-bin packages.
 RESTRICT="mirror bindist strip"
 QA_PREBUILT="
 	usr/bin/yaak-app-client

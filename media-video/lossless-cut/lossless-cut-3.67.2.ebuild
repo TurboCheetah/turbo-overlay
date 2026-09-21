@@ -2,19 +2,17 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
-MY_PV="3.67.2"
 
 inherit desktop xdg
 
 DESCRIPTION="Lossless video/audio editing: export media without reencoding, powered by ffmpeg"
-HOMEPAGE="https://mifi.no/losslesscut/
-https://github.com/mifi/lossless-cut"
-SRC_URI="https://github.com/mifi/lossless-cut/releases/download/v${MY_PV}/LosslessCut-linux-x86_64.AppImage
-	-> ${P}.AppImage
-https://raw.githubusercontent.com/mifi/lossless-cut/v${MY_PV}/no.mifi.losslesscut.appdata.xml
--> ${P}-metainfo.xml
+HOMEPAGE="https://mifi.no/losslesscut/ https://github.com/mifi/lossless-cut"
+SRC_URI="
+	https://github.com/mifi/lossless-cut/releases/download/v${PV}/LosslessCut-linux-x86_64.AppImage
+		-> ${P}.AppImage
+	https://raw.githubusercontent.com/mifi/lossless-cut/v${PV}/no.mifi.losslesscut.appdata.xml
+		-> ${P}-metainfo.xml
 "
-
 S="${WORKDIR}"
 
 LICENSE="GPL-2"
@@ -60,4 +58,16 @@ src_install() {
 
 	insinto /usr/share/metainfo
 	newins "${DISTDIR}"/${P}-metainfo.xml no.mifi.losslesscut.appdata.xml
+}
+
+pkg_postinst() {
+	xdg_desktop_database_update
+	xdg_mimeinfo_database_update
+	xdg_icon_cache_update
+}
+
+pkg_postrm() {
+	xdg_desktop_database_update
+	xdg_mimeinfo_database_update
+	xdg_icon_cache_update
 }
