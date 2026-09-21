@@ -3,6 +3,8 @@
 
 EAPI=8
 
+inherit go-module
+
 DESCRIPTION="Official Command Line Interface for the IPinfo API"
 HOMEPAGE="https://github.com/ipinfo/cli"
 SRC_URI="https://github.com/ipinfo/cli/archive/refs/tags/ipinfo-${PV}.tar.gz
@@ -13,10 +15,8 @@ LICENSE="Apache-2.0"
 SLOT="0"
 KEYWORDS="~amd64"
 
-BDEPEND=">=dev-lang/go-1.22"
-
 src_compile() {
-	CGO_ENABLED=0 go build -mod=vendor -trimpath -o "${T}/${PN}" ./ipinfo || die
+	ego build -mod=vendor -trimpath -o "${T}/${PN}" ./ipinfo || die
 }
 
 src_install() {

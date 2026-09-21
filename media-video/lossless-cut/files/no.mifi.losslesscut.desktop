@@ -7,7 +7,6 @@ MimeType=video/mpeg;video/x-mpeg;video/msvideo;video/quicktime;video/x-anim;vide
 Icon=no.mifi.losslesscut
 Terminal=false
 Type=Application
-Encoding=UTF-8
 Categories=AudioVideo;AudioVideoEditing;
 Keywords=trim;codec;cut;movie;mpeg;avi;h264;mkv;mp4;
 StartupWMClass=losslesscut

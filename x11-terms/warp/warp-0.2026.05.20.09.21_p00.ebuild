@@ -3,7 +3,7 @@
 
 EAPI=8
 
-inherit desktop xdg
+inherit cargo desktop xdg
 
 MY_PV="0.2026.05.20.09.21.stable_00"
 DESCRIPTION="The Agentic Development Environment"
@@ -34,22 +34,21 @@ RDEPEND="
 	x11-libs/libxcb
 	x11-libs/libxkbcommon[X]
 "
-DEPEND="${RDEPEND}"
+
 BDEPEND="
 	app-misc/jq
 	dev-build/cmake
-	dev-lang/rust
 	dev-libs/protobuf
 	llvm-core/clang
 	virtual/pkgconfig
 "
 
 src_compile() {
-	cargo build --release || die "cargo build failed"
+	cargo_src_compile
 }
 
 src_install() {
-	dobin target/release/warp
+	dobin "${S}"/target/release/warp
 
 	domenu app/channels/stable/dev.warp.Warp.desktop || die
 

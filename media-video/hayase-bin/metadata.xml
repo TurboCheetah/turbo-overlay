@@ -11,6 +11,7 @@
 		downloading the entire file first.
 	</longdescription>
 	<upstream>
+		<remote-id type="github">hayase-app/electron</remote-id>
 		<doc>https://hayase.watch/</doc>
 	</upstream>
 </pkgmetadata>

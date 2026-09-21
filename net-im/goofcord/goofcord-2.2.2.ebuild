@@ -67,6 +67,7 @@ src_install() {
 	fperms 0755 \
 		/opt/GoofCord/goofcord \
 		/opt/GoofCord/chrome_crashpad_handler \
+		/opt/GoofCord/resources/goofbind \
 		/opt/GoofCord/resources/patchcord
 	fperms 4755 /opt/GoofCord/chrome-sandbox
 

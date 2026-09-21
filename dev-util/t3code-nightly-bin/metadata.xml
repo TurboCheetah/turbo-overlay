@@ -8,7 +8,11 @@
 	<longdescription lang="en">
 		Nightly builds of T3 Code, a minimal GUI for working with code
 		and AI coding agents. Tracks the upstream -nightly release tags
-		(prereleases); use dev-util/t3code-bin for stable builds.
+		(prereleases); use dev-util/t3code-bin for stable builds. The
+		installed launcher passes --no-sandbox to the bundled Electron
+		binary, which is common for third-party Electron apps on Gentoo
+		when the upstream build does not ship a working user-namespace
+		sandbox configuration.
 	</longdescription>
 	<upstream>
 		<remote-id type="github">pingdotgg/t3code</remote-id>

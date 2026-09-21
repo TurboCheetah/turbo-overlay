@@ -9,10 +9,10 @@ This file contains essential information for agentic coding agents working in th
 **turbo-overlay** - Gentoo overlay (package definitions for Portage)
 - Architecture: amd64
 - EAPI: 8 (all ebuilds)
-- Packages: 15 ebuilds across 5 categories
+- Packages: 25 ebuilds across 9 unique packages in 5 categories
 - Master repository: gentoo
 
-Categories: games-util (vkbasalt), media-video (hayase-bin, lossless-cut), net-im (goofcord, vesktop-bin), x11-terms (warp-bin)
+Categories: dev-util (t3code-bin, t3code-nightly-bin, yaak-bin), media-video (hayase-bin, lossless-cut), net-im (goofcord), net-misc (ipinfo), x11-terms (warp)
 
 ---
 
@@ -64,8 +64,8 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 # Version bump
 .agents/skills/overlay-tools/bin/update-ebuild -y -v 1.2.3 category/package
 
-# With MY_PV mapping (for packages like warp-bin)
-.agents/skills/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+# With MY_PV mapping (for packages like warp)
+.agents/skills/overlay-tools/bin/update-ebuild -y -v 0.2026.06.03.09.49_p00 -m "0.2026.06.03.09.49.stable_00" x11-terms/warp
 
 # Dry run to preview
 .agents/skills/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
@@ -424,7 +424,7 @@ Signed-off-by: Name <email@example.com>
 
 ### Example from this overlay
 ```
-x11-terms/warp-bin: add 0.2025.12.10.08.12_p03, drop 0.2025.09.17.08.11_p02
+x11-terms/warp: add 0.2026.06.03.09.49_p00, drop 0.2026.05.13.09.15_pre00
 ```
 
 ---
@@ -458,20 +458,13 @@ turbo-overlay/
 
 ---
 
-## Known Issues to Fix
+## Known Issues / Deferred Work
 
-### Missing metadata.xml
-- **x11-terms/warp-bin**: No metadata.xml file
-  - **Action**: Create metadata.xml with maintainer info
+### Deferred refactors
+- **Electron `.deb` packages** (`net-im/goofcord`, `media-video/hayase-bin`): duplicated install/RDEPEND blocks could share a small eclass in a future PR.
 
-### Missing QA_PREBUILT
-- **media-video/hayase-bin**: Binary package without `QA_PREBUILT`
-- **net-im/goofcord**: Binary package without `QA_PREBUILT`
-  - **Action**: Add `QA_PREBUILT="opt/${PN}/*"`
-
-### Deprecated Packages
-- **net-im/vesktop-bin**: Marked as DEPRECATED in pkg_setup
-  - **Action**: This package should be removed entirely
+### Migrations
+- **deprecated/vesktop-bin** was removed. Users should install `net-im/vesktop` from the GURU overlay (see `README.md`).
 
 ---
 
