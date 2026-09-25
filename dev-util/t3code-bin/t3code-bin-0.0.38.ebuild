@@ -67,13 +67,19 @@ t3code_install_icon() {
 }
 
 t3code_install_license() {
+	local -a licenses=()
 	local license
 
-	license=$(find "${S}" -maxdepth 2 -name 'LICENSE' -print -quit)
-	[[ -n ${license} ]] || die "Could not locate LICENSE in ${APPIMAGE_NAME}"
+	mapfile -t licenses < <(find "${S}" -maxdepth 2 -type f \( \
+		-name 'LICENSE' -o -name 'LICENSE.*' -o -name 'LICENSES.*' \
+		\) -print | LC_ALL=C sort)
+
+	[[ ${#licenses[@]} -gt 0 ]] || die "Could not locate license files in ${APPIMAGE_NAME}"
 
 	insinto /usr/share/licenses/${PN}
-	newins "${license}" LICENSE
+	for license in "${licenses[@]}"; do
+		newins "${license}" "$(basename "${license}")"
+	done
 }
 
 src_install() {

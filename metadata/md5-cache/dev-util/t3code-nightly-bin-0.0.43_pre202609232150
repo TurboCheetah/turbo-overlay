@@ -12,4 +12,4 @@ RESTRICT=strip
 SLOT=0
 SRC_URI=https://github.com/pingdotgg/t3code/releases/download/v0.0.43-nightly.20260923.2150/T3-Code-0.0.43-nightly.20260923.2150-x86_64.AppImage
 _eclasses_=desktop	e447b5f77146d69797e9f03ff177f3f1	xdg	3ef49a87c52c8b77c476351195dfe575	xdg-utils	42869b3c8d86a70ef3cf75165a395e09
-_md5_=7e153c5bd45bd323e989271eeb90da88
+_md5_=b70982d93d417facda15f6745e5ddb30
