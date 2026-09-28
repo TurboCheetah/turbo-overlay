@@ -35,13 +35,22 @@ def fake_docker(monkeypatch: pytest.MonkeyPatch, returncode: int = 0) -> list[li
 
 def test_validates_exact_ebuild_path(tmp_path: Path) -> None:
     root = overlay(tmp_path)
-    (root / "dev-util/t3code-nightly-bin/different-1.ebuild").write_text("EAPI=8\n")
+    pkg = root / "dev-util/t3code-nightly-bin"
+    for name in (
+        "different-1.ebuild",
+        "t3code-nightly-bin-extra-1.ebuild",
+        "t3code-nightly-bin-x.ebuild",
+    ):
+        (pkg / name).write_text("EAPI=8\n")
     test_ebuild.validate_ebuild(root, EBUILD)
     for bad in (
         "dev-util/t3code-nightly-bin",
         "../outside.ebuild",
         "/etc/passwd",
+        "dev-util/../t3code-nightly-bin-1.ebuild",
         "dev-util/t3code-nightly-bin/different-1.ebuild",
+        "dev-util/t3code-nightly-bin/t3code-nightly-bin-extra-1.ebuild",
+        "dev-util/t3code-nightly-bin/t3code-nightly-bin-x.ebuild",
     ):
         with pytest.raises(ValueError):
             test_ebuild.validate_ebuild(root, bad)
@@ -57,11 +66,17 @@ def test_refuses_symlink_outside_overlay(tmp_path: Path) -> None:
         test_ebuild.validate_ebuild(root, "dev-util/t3code-nightly-bin/t3code-nightly-bin-2.ebuild")
 
 
-def test_refuses_overlay_path_with_comma(tmp_path: Path) -> None:
-    (tmp_path / "a,b").mkdir()
-    root = overlay(tmp_path / "a,b")
-    with pytest.raises(ValueError, match="comma"):
-        test_ebuild.validate_ebuild(root, EBUILD)
+@pytest.mark.parametrize("dirname", ["a,b", 'a"b'])
+def test_refuses_overlay_path_breaking_mount_spec(tmp_path: Path, dirname: str) -> None:
+    (tmp_path / dirname).mkdir()
+    root = overlay(tmp_path / dirname)
+    with pytest.raises(ValueError, match="comma or double quote"):
+        test_ebuild.validate_overlay(root)
+
+
+def test_refuses_non_overlay(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not a Gentoo overlay"):
+        test_ebuild.validate_overlay(tmp_path)
 
 
 def test_build_and_run_mount_readonly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -123,7 +138,9 @@ def test_returns_container_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert test_ebuild.main(["--overlay-path", str(root), EBUILD]) == 17
 
 
-def run_ebuild_fn(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def run_ebuild_fn(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     script = f'source "{RUN_EBUILD}"; "$@"'
     return subprocess.run(
         ["bash", "-c", script, "run-ebuild", *args],
@@ -145,7 +162,23 @@ def test_run_ebuild_image_dir(path: str, pf: str) -> None:
     result = run_ebuild_fn("image_dir_for", path, env={"PORTAGE_TMPDIR": "/tmp/x"})
     category = path.split("/")[0]
     assert result.stdout == f"/tmp/x/portage/{category}/{pf}/image\n"
-    assert run_ebuild_fn("image_dir_for", "net-im/goofcord/other-1.ebuild").returncode == 1
+    for bad in ("net-im/goofcord/other-1.ebuild", "net-im/goofcord/goofcord-extra-1.ebuild"):
+        assert run_ebuild_fn("image_dir_for", bad).returncode == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "valid"),
+    [
+        (EBUILD, True),
+        ("net-im/goofcord/goofcord-1.2.3-r1.ebuild", True),
+        ("net-im/../goofcord-1.ebuild", False),
+        ("./goofcord/goofcord-1.ebuild", False),
+        ("net-im/goofcord", False),
+        ("/net-im/goofcord/goofcord-1.ebuild", False),
+    ],
+)
+def test_run_ebuild_valid_ebuild_path(path: str, valid: bool) -> None:
+    assert (run_ebuild_fn("valid_ebuild_path", path).returncode == 0) is valid
 
 
 def test_run_ebuild_staged_path_checks(tmp_path: Path) -> None:

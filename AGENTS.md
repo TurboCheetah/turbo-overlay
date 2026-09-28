@@ -74,6 +74,22 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 .agents/skills/overlay-tools/bin/update-ebuild --pr -v 3.68.0_pre -m "3.68.0" media-video/lossless-cut
 ```
 
+### Phase-Test an Ebuild (Docker)
+
+```bash
+# First run builds the disposable stage3 image; later runs reuse it
+.agents/skills/overlay-tools/bin/test-ebuild --build \
+  --expect usr/bin/t3code \
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609272344.ebuild
+
+# Test a PR checkout instead of this repo
+.agents/skills/overlay-tools/bin/test-ebuild --overlay-path /path/to/pr-checkout \
+  category/package/package-version.ebuild
+```
+
+Runs fetch/Manifest validation and unpack→install only; it does not install
+runtime dependencies or run the app. Only use it on trusted ebuilds.
+
 ### Automated Updates (GitHub Actions)
 
 The workflow at `.github/workflows/check-updates.yml` runs on two schedules: daily (06:37 UTC) for nightly-channel packages (`check-updates --channel nightly`) and weekly on Sunday (07:07 UTC) for every other channel (`--exclude-channel nightly`). A manual dispatch checks all packages unless the `channel` / `exclude_channel` inputs are supplied.

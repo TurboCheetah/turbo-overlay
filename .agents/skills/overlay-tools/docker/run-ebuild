@@ -8,7 +8,9 @@ usage="usage: run-ebuild category/package/package-version.ebuild [staged-path ..
 name_chars='[a-zA-Z0-9+_.-]+'
 
 valid_ebuild_path() {
-    [[ ${1} =~ ^${name_chars}/${name_chars}/${name_chars}\.ebuild$ ]]
+    local path=${1}
+    [[ ${path} =~ ^${name_chars}/${name_chars}/${name_chars}\.ebuild$ ]] || return 1
+    [[ /${path}/ != */../* && /${path}/ != */./* ]]
 }
 
 valid_staged_path() {
@@ -25,7 +27,8 @@ image_dir_for() {
     package=${rest%%/*}
     pf=${rest#*/}
     pf=${pf%.ebuild}
-    [[ ${pf} == "${package}"-* ]] || return 1
+    # Portage versions start with a digit, so cat/foo/foo-bar-1.ebuild is rejected.
+    [[ ${pf} == "${package}"-[0-9]* ]] || return 1
     printf '%s/portage/%s/%s/image\n' "${PORTAGE_TMPDIR:-/var/tmp}" "${category}" "${pf}"
 }
 
@@ -85,7 +88,8 @@ main() {
     printf 'Testing %s in %s\n' "${path}" "$(portageq get_repo_path / turbo-overlay)"
     # Real Portage phases, including fetch+Manifest verification and install
     # into the staging image. Runtime dependencies are not resolved or built.
-    ebuild "${repo}/${path}" clean fetch unpack prepare configure compile install
+    ebuild "${repo}/${path}" clean fetch unpack prepare configure compile install \
+        || { echo "Portage phases failed: ${path}" >&2; exit 1; }
 
     [[ -d ${image} ]] || { echo "Missing Portage install image: ${image}" >&2; exit 1; }
     for expected in "$@"; do
