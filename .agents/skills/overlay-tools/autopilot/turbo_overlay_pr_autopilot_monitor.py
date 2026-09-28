@@ -83,24 +83,26 @@ def snapshot():
             "-f",
             "query=query($owner:String!, $name:String!, $number:Int!) { "
             "repository(owner:$owner, name:$name) { pullRequest(number:$number) { "
-            "reviewThreads(first:100) { nodes { isResolved } "
+            "reviewThreads(first:100) { nodes { id isResolved } "
             "pageInfo { hasNextPage } } } } }",
         )
         thread_data = threads["data"]["repository"]["pullRequest"]["reviewThreads"]
         if thread_data["pageInfo"]["hasNextPage"]:
             raise RuntimeError(f"PR #{pr['number']} has >100 review threads; manual review needed")
+        thread_state = sorted(f"{t['id']}:{int(t['isResolved'])}" for t in thread_data["nodes"])
         output.append(
             {
                 "number": pr["number"],
                 "head": pr["headRefOid"],
                 "base": pr["baseRefName"],
-                "author": pr["author"]["login"],
+                "author": (pr.get("author") or {}).get("login"),
                 "head_owner": (pr.get("headRepositoryOwner") or {}).get("login"),
                 "draft": pr["isDraft"],
                 "checks": checks,
                 "bot_reviews": reviews,
                 "bot_comments": comments,
                 "unresolved_threads": sum(not t["isResolved"] for t in thread_data["nodes"]),
+                "threads_digest": digest(";".join(thread_state)),
             }
         )
     return {"repository": REPO, "prs": output}
@@ -109,6 +111,6 @@ def snapshot():
 if __name__ == "__main__":
     try:
         print(json.dumps(snapshot(), sort_keys=True, separators=(",", ":")))
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"PR monitor failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

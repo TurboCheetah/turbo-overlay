@@ -4,7 +4,10 @@
 import json
 import sys
 
-payload = json.load(sys.stdin)
+try:
+    payload = json.load(sys.stdin)
+except (ValueError, UnicodeDecodeError):
+    payload = {}
 repo = payload.get("repository") or {}
 pr = payload.get("pull_request") or {}
 if (

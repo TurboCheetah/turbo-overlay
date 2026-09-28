@@ -32,28 +32,33 @@ def fixture(
     failed_check=False,
     unresolved=False,
     skipped_comment=False,
+    draft=False,
+    state="open",
+    mergeable_state="clean",
+    no_repo_workflow=False,
 ):
     pr = {
-        "state": "open",
-        "draft": False,
+        "state": state,
+        "draft": draft,
         "head": {"sha": SHA, "repo": {"full_name": head_repo}},
         "base": {"ref": "master", "repo": {"full_name": gate.REPO}},
         "user": {"login": author},
         "mergeable": True,
-        "mergeable_state": "clean",
+        "mergeable_state": mergeable_state,
     }
+    checks = [
+        {
+            "__typename": "CheckRun",
+            "name": "build",
+            "workflowName": "pkgcheck",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE" if failed_check else "SUCCESS",
+        },
+        {"__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS"},
+    ]
     details = {
         "reviewDecision": "",
-        "statusCheckRollup": [
-            {
-                "__typename": "CheckRun",
-                "name": "build",
-                "workflowName": "pkgcheck",
-                "status": "COMPLETED",
-                "conclusion": "FAILURE" if failed_check else "SUCCESS",
-            },
-            {"__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS"},
-        ],
+        "statusCheckRollup": [] if no_repo_workflow else checks,
     }
     reviews = [
         {
@@ -129,6 +134,20 @@ class MergeGateTests(unittest.TestCase):
     def test_skipped_status_comment_blocks(self):
         self.assertTrue(any("status comment" in r for r in self.check(skipped_comment=True)))
 
+    def test_draft_blocks(self):
+        self.assertTrue(any("closed or draft" in r for r in self.check(draft=True)))
+
+    def test_closed_pr_blocks(self):
+        self.assertTrue(any("closed or draft" in r for r in self.check(state="closed")))
+
+    def test_non_clean_merge_state_blocks(self):
+        self.assertTrue(any("merge state" in r for r in self.check(mergeable_state="dirty")))
+
+    def test_missing_repo_workflow_blocks(self):
+        self.assertTrue(
+            any("no completed repository CI" in r for r in self.check(no_repo_workflow=True))
+        )
+
     def test_merge_uses_reviewed_sha_and_verifies_readback(self):
         merged = {
             "merged": True,
@@ -156,6 +175,19 @@ class MergeGateTests(unittest.TestCase):
         ):
             self.assertEqual(gate.main(), 1)
         command.assert_not_called()
+
+    def test_readback_mismatch_does_not_report_merged(self):
+        merged = {"merged": False, "head": {"sha": "d" * 40}, "html_url": ""}
+        with (
+            patch.object(gate, "inspect", return_value=([], SHA)),
+            patch.object(gate, "gh", return_value=merged),
+            patch.object(gate.subprocess, "run") as command,
+            patch.object(sys, "argv", ["gate", "102", SHA, "--merge"]),
+        ):
+            self.assertEqual(gate.main(), 1)
+        command.assert_called_once()
+        output = str(command.call_args)
+        self.assertIn("--squash", output)
 
     def test_wrong_sha_blocks(self):
         with patch.object(gate, "gh", side_effect=fixture()):
@@ -212,14 +244,19 @@ class MonitorTests(unittest.TestCase):
                     "body": "private feedback",
                 }
             ],
-            "comments": [],
+            "comments": [
+                {
+                    "author": {"login": "coderabbitai[bot]"},
+                    "body": "secret commented body",
+                }
+            ],
         }
         graphql = {
             "data": {
                 "repository": {
                     "pullRequest": {
                         "reviewThreads": {
-                            "nodes": [{"isResolved": False}],
+                            "nodes": [{"id": "PRRT_1", "isResolved": False}],
                             "pageInfo": {"hasNextPage": False},
                         }
                     }
@@ -238,6 +275,10 @@ class MonitorTests(unittest.TestCase):
             self.assertEqual(first, monitor.snapshot())
         self.assertEqual(first["prs"][0]["unresolved_threads"], 1)
         self.assertNotIn("private feedback", json.dumps(first))
+        self.assertNotIn("secret commented body", json.dumps(first))
+        self.assertEqual(
+            first["prs"][0]["bot_comments"][0]["body_hash"], monitor.digest("secret commented body")
+        )
 
 
 if __name__ == "__main__":

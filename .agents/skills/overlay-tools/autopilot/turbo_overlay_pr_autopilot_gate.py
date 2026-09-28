@@ -16,6 +16,13 @@ def gh(*args):
     return json.loads(result.stdout)
 
 
+def flatten_pages(items):
+    """gh api --paginate --slurp returns a list of page arrays; merge them."""
+    if all(isinstance(i, list) for i in items):
+        return [item for page in items for item in page]
+    return items
+
+
 def inspect(number, expected_head):
     pr = gh("api", f"repos/{REPO}/pulls/{number}")
     head = pr["head"]["sha"]
@@ -48,7 +55,9 @@ def inspect(number, expected_head):
     if details.get("reviewDecision") in {"CHANGES_REQUESTED", "REVIEW_REQUIRED"}:
         reasons.append(f"GitHub review gate: {details['reviewDecision']}")
 
-    reviews = gh("api", f"repos/{REPO}/pulls/{number}/reviews", "--paginate")
+    reviews = flatten_pages(
+        gh("api", f"repos/{REPO}/pulls/{number}/reviews", "--paginate", "--slurp")
+    )
     latest = {}
     for review in reviews:
         user = review["user"]["login"].lower().removesuffix("[bot]")
@@ -67,7 +76,9 @@ def inspect(number, expected_head):
         elif "rate limit" in (review.get("body") or "").lower():
             reasons.append(f"{bot} review was rate-limited")
 
-    comments = gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate")
+    comments = flatten_pages(
+        gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
+    )
     rabbit = latest.get("coderabbitai")
     for comment in comments:
         user = comment["user"]["login"].lower().removesuffix("[bot]")
@@ -114,7 +125,7 @@ def main():
         parser.error("invalid PR number or head SHA")
     try:
         reasons, head = inspect(args.number, args.expected_head)
-    except (KeyError, ValueError, subprocess.SubprocessError) as exc:
+    except (KeyError, ValueError, subprocess.SubprocessError, RuntimeError) as exc:
         print(f"BLOCKED: could not verify every gate: {exc}")
         return 1
     if reasons:
@@ -128,24 +139,32 @@ def main():
     if not args.merge:
         print(json.dumps({"merge_ready": True, "number": args.number, "head": head}))
         return 0
-    subprocess.run(
-        [
-            "gh",
-            "pr",
-            "merge",
-            str(args.number),
-            "-R",
-            REPO,
-            "--squash",
-            "--match-head-commit",
-            head,
-        ],
-        check=True,
-        timeout=90,
-    )
-    merged = gh("api", f"repos/{REPO}/pulls/{args.number}")
+    try:
+        subprocess.run(
+            [
+                "gh",
+                "pr",
+                "merge",
+                str(args.number),
+                "-R",
+                REPO,
+                "--squash",
+                "--match-head-commit",
+                head,
+            ],
+            check=True,
+            timeout=90,
+        )
+        merged = gh("api", f"repos/{REPO}/pulls/{args.number}")
+    except (subprocess.SubprocessError, KeyError, ValueError) as exc:
+        print(f"BLOCKED: merge or read-back failed: {exc}")
+        return 1
     if not merged.get("merged") or merged["head"]["sha"] != head:
-        raise RuntimeError("merge command returned, but read-back did not confirm target head")
+        print(
+            "BLOCKED: merge command returned, but read-back did not confirm target head; "
+            "the PR may already be merged — verify manually"
+        )
+        return 1
     print(
         json.dumps({"merged": True, "number": args.number, "head": head, "url": merged["html_url"]})
     )
