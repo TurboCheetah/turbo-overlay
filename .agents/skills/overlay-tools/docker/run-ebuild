@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The host mounts the checkout read-only. All Portage build/fetch state stays
+# inside this disposable container, not on the maintainer's Gentoo system.
+path=${1:?usage: run-ebuild category/package/package-version.ebuild [expected-image-path ...]}
+shift
+if [[ ! ${path} =~ ^[a-zA-Z0-9+_.-]+/[a-zA-Z0-9+_.-]+/[a-zA-Z0-9+_.-]+\.ebuild$ ]]; then
+    echo "Invalid ebuild path: ${path}" >&2
+    exit 2
+fi
+
+repo=/var/db/repos/turbo-overlay
+ebuild_file="${repo}/${path}"
+[[ -f ${ebuild_file} ]] || { echo "Missing ebuild: ${path}" >&2; exit 2; }
+[[ -f ${repo}/profiles/repo_name ]] || { echo "Not a Gentoo overlay: ${repo}" >&2; exit 2; }
+
+mkdir -p /etc/portage/repos.conf
+printf '[DEFAULT]\nmain-repo = gentoo\n\n[gentoo]\nlocation = /var/db/repos/gentoo\n\n[turbo-overlay]\nlocation = %s\nmasters = gentoo\nauto-sync = no\n' "${repo}" > /etc/portage/repos.conf/turbo-overlay.conf
+
+# Stage3 does not have a user-configured amd64 profile. Use the official
+# repository's amd64 profile so Portage selects the correct eclasses/USE defaults.
+[[ -e /etc/portage/make.profile ]] || ln -s /var/db/repos/gentoo/profiles/default/linux/amd64/23.0 /etc/portage/make.profile
+export ACCEPT_KEYWORDS='~amd64'
+# Unprivileged Docker containers cannot create the namespaces those Portage
+# sandbox modes need. Keep Portage's filesystem sandbox enabled.
+export FEATURES='-ipc-sandbox -network-sandbox -pid-sandbox'
+
+printf 'Testing %s in %s\n' "${path}" "$(portageq get_repo_path / turbo-overlay)"
+# Run real Portage phases, including fetch+Manifest verification and install
+# into the staging image. This does NOT resolve/build runtime dependencies or
+# install the package into the container root; those need a full emerge test.
+ebuild "${ebuild_file}" clean fetch unpack prepare configure compile install
+
+category=${path%%/*}
+rest=${path#*/}
+package=${rest%%/*}
+version=${rest#*/}
+version=${version#"${package}"-}
+version=${version%.ebuild}
+image="/var/tmp/portage/${category}/${package}-${version}/image"
+[[ -d ${image} ]] || { echo "Missing Portage install image: ${image}" >&2; exit 1; }
+if [[ -z $(find "${image}" -mindepth 1 -print -quit) ]]; then
+    echo "Portage install image is empty: ${image}" >&2
+    exit 1
+fi
+for expected in "$@"; do
+    if [[ ! ${expected} =~ ^[a-zA-Z0-9+_.-]+(/[a-zA-Z0-9+_.-]+)*$ || ${expected} == . || ${expected} == .. || /${expected}/ == */../* || /${expected}/ == */./* ]]; then
+        echo "Invalid expected image path: ${expected}" >&2
+        exit 2
+    fi
+    if [[ ! -e ${image}/${expected} ]]; then
+        echo "Missing expected image path: ${expected}" >&2
+        exit 1
+    fi
+    printf 'OK: staged %s\n' "${expected}"
+done
+printf 'PASS: Portage phases completed; install image has content at %s\n' "${image}"

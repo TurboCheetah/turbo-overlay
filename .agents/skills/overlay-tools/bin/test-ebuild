@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OVERLAY_TOOLS_DIR="$(dirname "$SCRIPT_DIR")"
+exec uv run --project "$OVERLAY_TOOLS_DIR" python -m overlay_tools.cli.test_ebuild "$@"

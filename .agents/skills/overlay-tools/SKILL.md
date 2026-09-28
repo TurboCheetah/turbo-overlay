@@ -8,6 +8,7 @@ metadata:
 aliases:
   - check-updates
   - update-ebuild
+  - test-ebuild
 ---
 
 # Overlay Tools
@@ -95,6 +96,29 @@ Bump ebuild versions with optional PR automation.
 | `--branch BRANCH` | Override feature branch name |
 | `--draft` | Create PR as draft |
 | `--upstream-url URL` | Upstream release URL for PR body |
+
+### test-ebuild
+
+Run a specific version through real Portage phases in a disposable Gentoo
+container. This is not a host `emerge` and does not test runtime dependencies.
+
+```bash
+.agents/skills/overlay-tools/bin/test-ebuild --build \
+  --overlay-path /path/to/pr-checkout \
+  --expect opt/t3code-nightly-bin/t3code \
+  --expect usr/bin/t3code \
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609282375.ebuild
+```
+
+Build once (`--build`); subsequent calls reuse the local Docker image. Use an
+explicit PR checkout path rather than whichever branch happens to be current.
+The overlay is bind-mounted read-only; Portage's distfiles, workdir and image
+are ephemeral. An exit code of zero means fetch/Manifest validation and
+unpack→install phases succeeded and the requested staged paths exist. It does
+**not** prove that RDEPEND is complete, the package is installed, or its GUI
+runs. A bare stage3 may report unresolved sonames for dependencies that would
+be supplied by a real `emerge`. Only run trusted ebuilds: Docker does not make
+untrusted build scripts safe.
 
 ## Requirements
 

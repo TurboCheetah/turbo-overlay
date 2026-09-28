@@ -36,6 +36,31 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 .agents/skills/overlay-tools/bin/update-ebuild --pr -v 1.2.3 -m "1.2.3" --upstream-url "https://..." category/package
 ```
 
+### Test an exact ebuild in Docker
+
+```bash
+# Builds a reusable local image from Gentoo stage3 with a Gentoo repo snapshot.
+.agents/skills/overlay-tools/bin/test-ebuild --build \
+  --overlay-path /path/to/pr-checkout \
+  --expect usr/bin/t3code \
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609282375.ebuild
+
+# Subsequent tests reuse the image and can target any overlay checkout.
+.agents/skills/overlay-tools/bin/test-ebuild \
+  --overlay-path /path/to/pr-checkout \
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609282375.ebuild
+```
+
+`--build` creates `turbo-overlay/ebuild-test:local` (subsequent runs reuse it).
+The checkout is mounted read-only. Portage fetches the distfile, validates the
+Manifest, and runs `unpack`, `prepare`, `configure`, `compile`, and `install` into
+a disposable container image directory. Repeat `--expect RELATIVE/PATH` to
+assert installed files exist. Exit nonzero on any phase or assertion failure.
+It does **not** install runtime dependencies, run the GUI, or prove the package
+works on a real desktop; missing-library QA notices from a bare stage3 need
+confirmation after a full dependency install. Only test trusted ebuilds:
+Docker is not a sandbox for hostile package code.
+
 ## Development
 
 ```bash
