@@ -71,6 +71,13 @@ works on a real desktop; missing-library QA notices from a bare stage3 need
 confirmation after a full dependency install. Only test trusted ebuilds:
 Docker is not a sandbox for hostile package code.
 
+### Review new PRs
+
+The [PR autopilot](autopilot/README.md) contains the deployed review worker's
+filter, monitor, merge gate, and tests. The signed webhook and Hermes job
+configuration are local and are **not** committed. External forks get review
+but require your approval before merge.
+
 ## Development
 
 ```bash
