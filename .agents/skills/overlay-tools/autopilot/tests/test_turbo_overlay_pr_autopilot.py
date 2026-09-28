@@ -119,7 +119,11 @@ class MergeGateTests(unittest.TestCase):
         self.assertEqual(self.check(), [])
 
     def test_external_fork_never_merges(self):
-        reasons = self.check(author="outside", head_repo="outside/turbo-overlay")
+        reasons = self.check(head_repo="outside/turbo-overlay")
+        self.assertTrue(any("manual approval" in r for r in reasons))
+
+    def test_unauthorized_author_never_merges(self):
+        reasons = self.check(author="outside")
         self.assertTrue(any("manual approval" in r for r in reasons))
 
     def test_stale_bot_review_blocks(self):
@@ -205,6 +209,7 @@ class WebhookFilterTests(unittest.TestCase):
             ("edited", gate.REPO, 102, False),
             ("opened", "other/repo", 102, False),
             ("opened", gate.REPO, "102", False),
+            ("opened", gate.REPO, True, False),
         ):
             event = {
                 "action": action,
@@ -221,6 +226,19 @@ class WebhookFilterTests(unittest.TestCase):
             output = json.loads(result.stdout)
             self.assertEqual(not output.get("__hermes_ignore__", False), accepted)
 
+    def test_malformed_payload_fails_closed(self):
+        path = ROOT / "turbo_overlay_pr_autopilot_filter.py"
+        for bad in ("", "not json", "[]", '"x"', "null"):
+            result = subprocess.run(
+                [sys.executable, str(path)],
+                input=bad,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            output = json.loads(result.stdout)
+            self.assertTrue(output.get("__hermes_ignore__", False), bad)
+
 
 class MonitorTests(unittest.TestCase):
     def test_new_pr_snapshot_is_stable_and_does_not_include_raw_bot_text(self):
@@ -232,6 +250,8 @@ class MonitorTests(unittest.TestCase):
             "number": 102,
             "headRefOid": SHA,
             "baseRefName": "master",
+            "mergeable": "UNSTABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
             "headRepositoryOwner": {"login": "TurboCheetah"},
             "author": {"login": "overlay-bot[bot]"},
             "isDraft": False,
@@ -274,6 +294,8 @@ class MonitorTests(unittest.TestCase):
             first = monitor.snapshot()
             self.assertEqual(first, monitor.snapshot())
         self.assertEqual(first["prs"][0]["unresolved_threads"], 1)
+        self.assertEqual(first["prs"][0]["mergeable"], "UNSTABLE")
+        self.assertEqual(first["prs"][0]["review_decision"], "REVIEW_REQUIRED")
         self.assertNotIn("private feedback", json.dumps(first))
         self.assertNotIn("secret commented body", json.dumps(first))
         self.assertEqual(

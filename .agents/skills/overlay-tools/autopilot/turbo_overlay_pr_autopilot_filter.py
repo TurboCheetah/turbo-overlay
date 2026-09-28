@@ -8,13 +8,18 @@ try:
     payload = json.load(sys.stdin)
 except (ValueError, UnicodeDecodeError):
     payload = {}
-repo = payload.get("repository") or {}
-pr = payload.get("pull_request") or {}
+if not isinstance(payload, dict):
+    payload = {}
+repo = payload.get("repository")
+repo = repo if isinstance(repo, dict) else {}
+pr = payload.get("pull_request")
+pr = pr if isinstance(pr, dict) else {}
+number = pr.get("number")
 if (
     repo.get("full_name") != "TurboCheetah/turbo-overlay"
     or payload.get("action") not in {"opened", "reopened", "synchronize"}
-    or not isinstance(pr.get("number"), int)
-    or pr["number"] < 1
+    or type(number) is not int
+    or number < 1
 ):
     print(json.dumps({"__hermes_ignore__": True}))
 else:
@@ -22,7 +27,7 @@ else:
         json.dumps(
             {
                 "repo": "TurboCheetah/turbo-overlay",
-                "number": pr["number"],
+                "number": number,
                 "action": payload["action"],
             }
         )

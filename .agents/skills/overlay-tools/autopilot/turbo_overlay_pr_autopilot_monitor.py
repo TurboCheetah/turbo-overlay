@@ -39,7 +39,7 @@ def snapshot():
         "--limit",
         "500",
         "--json",
-        "number,headRefOid,baseRefName,headRepositoryOwner,author,isDraft,statusCheckRollup,latestReviews,comments",
+        "number,headRefOid,baseRefName,mergeable,reviewDecision,headRepositoryOwner,author,isDraft,statusCheckRollup,latestReviews,comments",
     )
     output = []
     for pr in sorted(prs, key=lambda p: p["number"]):
@@ -95,6 +95,8 @@ def snapshot():
                 "number": pr["number"],
                 "head": pr["headRefOid"],
                 "base": pr["baseRefName"],
+                "mergeable": pr.get("mergeable"),
+                "review_decision": pr.get("reviewDecision"),
                 "author": (pr.get("author") or {}).get("login"),
                 "head_owner": (pr.get("headRepositoryOwner") or {}).get("login"),
                 "draft": pr["isDraft"],

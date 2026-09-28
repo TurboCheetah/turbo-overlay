@@ -20,8 +20,8 @@ repos:
     hooks:
       - id: ty
         name: ty (overlay-tools)
-        entry: bash -c 'cd .agents/skills/overlay-tools && uv run ty check src'
+        entry: bash -c 'cd .agents/skills/overlay-tools && uv run ty check src autopilot'
         language: system
         pass_filenames: false
-        files: ^\.agents/skills/overlay-tools/(src/|pyproject\.toml$)
+        files: ^\.agents/skills/overlay-tools/(src/|autopilot/|pyproject\.toml$)
 
