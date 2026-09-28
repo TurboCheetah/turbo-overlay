@@ -133,10 +133,10 @@ be supplied by a real `emerge`. Build phases run without Portage's network
 sandbox, so network access during `src_compile` is not caught. Only run trusted
 ebuilds: Docker does not make untrusted build scripts safe.
 
-**Exit Codes:** `0` = phases and assertions passed, `1` = phase or assertion
-failure, `2` = invalid arguments or overlay, missing Docker, image not built or
-failed to build, container setup failure (repos.conf, overlay registration) or
-build dependencies that failed to install, `127` = `uv` is not installed. Other
+**Exit Codes:** `0` = phases and assertions passed, `1` = build dependencies
+failed to install, or a phase or assertion failed, `2` = invalid arguments or
+overlay, missing Docker, image not built or failed to build, or container setup
+failure (repos.conf, overlay registration), `127` = `uv` is not installed. Other
 non-zero codes come from `docker run` itself (e.g. `137` if the container is
 killed).
 

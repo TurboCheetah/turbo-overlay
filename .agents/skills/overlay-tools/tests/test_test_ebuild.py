@@ -292,7 +292,7 @@ def test_run_ebuild_main_passes(tmp_path: Path) -> None:
     [
         ([EBUILD], {"FAKE_EBUILD_RC": "3"}, 1, "Portage phases failed"),
         ([EBUILD, "usr/bin/missing"], {}, 1, "Missing staged path: usr/bin/missing"),
-        ([EBUILD], {"FAKE_EMERGE_RC": "1"}, 2, "Could not install build dependencies"),
+        ([EBUILD], {"FAKE_EMERGE_RC": "1"}, 1, "Could not install build dependencies"),
         ([EBUILD], {"FAKE_REPO_PATH": ""}, 2, "Portage did not register overlay"),
         ([EBUILD], {"FAKE_TMPDIR": ""}, 2, "Portage has no PORTAGE_TMPDIR"),
         (["dev-util/t3code-nightly-bin/t3code-nightly-bin-2.ebuild"], {}, 2, "Missing ebuild"),

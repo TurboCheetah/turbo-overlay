@@ -119,8 +119,10 @@ main() {
 
     printf 'Testing %s in %s\n' "${path}" "${repo_path}"
     pf=${path##*/}
+    # Unsatisfiable DEPEND/BDEPEND is usually an ebuild bug, so this is a test
+    # failure (1) even though a network outage can also cause it.
     install_build_deps "=${path%%/*}/${pf%.ebuild}::${name}" \
-        || { echo "Could not install build dependencies: ${path}" >&2; exit 2; }
+        || { echo "Could not install build dependencies: ${path}" >&2; exit 1; }
     # Real Portage phases, including fetch+Manifest verification and install
     # into the staging image. Runtime dependencies are not resolved or built.
     ebuild "${repo}/${path}" clean fetch unpack prepare configure compile install \
