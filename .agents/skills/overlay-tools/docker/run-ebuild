@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The host mounts the checkout read-only. All Portage build/fetch state stays
+# inside this disposable container, not on the maintainer's Gentoo system.
+
+usage="usage: run-ebuild category/package/package-version.ebuild [staged-path ...]"
+name_chars='[a-zA-Z0-9+_.-]+'
+
+valid_ebuild_path() {
+    local path=${1}
+    [[ ${path} =~ ^${name_chars}/${name_chars}/${name_chars}\.ebuild$ ]] || return 1
+    [[ /${path}/ != */../* && /${path}/ != */./* ]]
+}
+
+valid_staged_path() {
+    local path=${1}
+    [[ ${path} =~ ^${name_chars}(/${name_chars})*$ ]] || return 1
+    [[ /${path}/ != */../* && /${path}/ != */./* ]]
+}
+
+# Portage stages installs under ${PORTAGE_TMPDIR}/portage/${CATEGORY}/${PF}/image.
+# main() sets PORTAGE_TMPDIR from Portage's config so make.conf overrides apply.
+image_dir_for() {
+    local path=${1} category rest package pf
+    category=${path%%/*}
+    rest=${path#*/}
+    package=${rest%%/*}
+    pf=${rest#*/}
+    pf=${pf%.ebuild}
+    # Portage versions start with a digit, so cat/foo/foo-bar-1.ebuild is rejected.
+    [[ ${pf} == "${package}"-[0-9]* ]] || return 1
+    printf '%s/portage/%s/%s/image\n' "${PORTAGE_TMPDIR:-/var/tmp}" "${category}" "${pf}"
+}
+
+# Parent directories must be real directories: an absolute symlink there would
+# resolve against the container root instead of the staging image. The final
+# component may be a symlink whose target only exists on the installed system.
+staged_path_exists() {
+    local image=${1} path=${2} current=${1} component
+    local -a components
+    IFS=/ read -ra components <<< "${path}"
+    for component in "${components[@]:0:${#components[@]}-1}"; do
+        current=${current}/${component}
+        [[ -d ${current} && ! -L ${current} ]] || return 1
+    done
+    current=${image}/${path}
+    [[ -e ${current} || -L ${current} ]]
+}
+
+# PORTAGE_CONFIGROOT is honoured so tests can point Portage config at a temp dir.
+portage_conf() {
+    local root=${PORTAGE_CONFIGROOT:-/}
+    printf '%s/etc/portage\n' "${root%/}"
+}
+
+# Callers use `|| exit`, which disables set -e in these helpers, hence the explicit returns.
+write_repos_conf() {
+    local name=${1} location=${2} conf
+    conf=$(portage_conf)
+    mkdir -p "${conf}/repos.conf" || return
+    cat > "${conf}/repos.conf/ebuild-test.conf" <<-EOF
+	[DEFAULT]
+	main-repo = gentoo
+
+	[gentoo]
+	location = /var/db/repos/gentoo
+
+	[${name}]
+	location = ${location}
+	masters = gentoo
+	auto-sync = no
+	EOF
+}
+
+# The target is usually ~amd64 and may carry a non-free license; only it is
+# unmasked, so its build deps resolve from the stable Gentoo tree.
+install_build_deps() {
+    local atom=${1} conf
+    conf=$(portage_conf)
+    mkdir -p "${conf}/package.accept_keywords" "${conf}/package.license" || return
+    echo "${atom} ~amd64" > "${conf}/package.accept_keywords/ebuild-test" || return
+    echo "${atom} *" > "${conf}/package.license/ebuild-test" || return
+    emerge --oneshot --quiet-build --onlydeps --onlydeps-with-rdeps=n "${atom}"
+}
+
+main() {
+    [[ $# -ge 1 ]] || { echo "${usage}" >&2; exit 2; }
+    [[ -n ${OVERLAY_REPO:-} ]] || { echo "OVERLAY_REPO must name the mounted overlay" >&2; exit 2; }
+    local path=${1} repo=${OVERLAY_REPO} expected image name repo_path pf
+    shift
+
+    valid_ebuild_path "${path}" || { echo "Invalid ebuild path: ${path}" >&2; exit 2; }
+    for expected in "$@"; do
+        valid_staged_path "${expected}" \
+            || { echo "Invalid staged path: ${expected}" >&2; exit 2; }
+    done
+    image_dir_for "${path}" >/dev/null \
+        || { echo "Ebuild filename does not match package: ${path}" >&2; exit 2; }
+    [[ -f ${repo}/${path} ]] || { echo "Missing ebuild: ${path}" >&2; exit 2; }
+    [[ -f ${repo}/profiles/repo_name ]] || { echo "Not a Gentoo overlay: ${repo}" >&2; exit 2; }
+    read -r name < "${repo}/profiles/repo_name" || true
+    [[ ${name} =~ ^${name_chars}$ ]] || { echo "Invalid repo_name in ${repo}" >&2; exit 2; }
+    [[ -e $(portage_conf)/make.profile ]] || { echo "Stage3 has no make.profile" >&2; exit 2; }
+
+    # Setup failures below mean the container is unusable, not that the ebuild
+    # is broken, so they exit 2 rather than 1.
+    write_repos_conf "${name}" "${repo}" \
+        || { echo "Cannot write Portage repos.conf" >&2; exit 2; }
+    repo_path=$(portageq get_repo_path / "${name}") && [[ -n ${repo_path} ]] \
+        || { echo "Portage did not register overlay ${name}" >&2; exit 2; }
+    PORTAGE_TMPDIR=$(portageq envvar PORTAGE_TMPDIR) && [[ -n ${PORTAGE_TMPDIR} ]] \
+        || { echo "Portage has no PORTAGE_TMPDIR" >&2; exit 2; }
+    export PORTAGE_TMPDIR
+    image=$(image_dir_for "${path}")
+    # Unprivileged Docker containers cannot create the namespaces those Portage
+    # sandbox modes need. Keep Portage's filesystem sandbox enabled.
+    export FEATURES='-ipc-sandbox -network-sandbox -pid-sandbox'
+
+    printf 'Testing %s in %s\n' "${path}" "${repo_path}"
+    pf=${path##*/}
+    # Unsatisfiable DEPEND/BDEPEND is usually an ebuild bug, so this is a test
+    # failure (1) even though a network outage can also cause it.
+    install_build_deps "=${path%%/*}/${pf%.ebuild}::${name}" \
+        || { echo "Could not install build dependencies: ${path}" >&2; exit 1; }
+    # Real Portage phases, including fetch+Manifest verification and install
+    # into the staging image. Runtime dependencies are not resolved or built.
+    ebuild "${repo}/${path}" clean fetch unpack prepare configure compile install \
+        || { echo "Portage phases failed: ${path}" >&2; exit 1; }
+
+    [[ -d ${image} ]] || { echo "Missing Portage install image: ${image}" >&2; exit 1; }
+    for expected in "$@"; do
+        if ! staged_path_exists "${image}" "${expected}"; then
+            echo "Missing staged path: ${expected}" >&2
+            exit 1
+        fi
+        printf 'OK: staged %s\n' "${expected}"
+    done
+    printf 'PASS: Portage phases completed; install image at %s\n' "${image}"
+}
+
+if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
+    main "$@"
+fi

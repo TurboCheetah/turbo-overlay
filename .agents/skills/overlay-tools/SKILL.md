@@ -1,6 +1,6 @@
 ---
 name: overlay-tools
-description: Gentoo overlay maintenance tools. Use /check-updates to find outdated packages, /update-ebuild to bump versions.
+description: Gentoo overlay maintenance tools. Use /check-updates to find outdated packages, /update-ebuild to bump versions, /test-ebuild to run an ebuild's Portage phases in Docker.
 license: MIT
 metadata:
   audience: maintainers
@@ -8,6 +8,7 @@ metadata:
 aliases:
   - check-updates
   - update-ebuild
+  - test-ebuild
 ---
 
 # Overlay Tools
@@ -96,9 +97,53 @@ Bump ebuild versions with optional PR automation.
 | `--draft` | Create PR as draft |
 | `--upstream-url URL` | Upstream release URL for PR body |
 
+### test-ebuild
+
+Run a specific version through real Portage phases in a disposable Gentoo
+container. Build dependencies are emerged inside the container first. This is
+not a host `emerge` and does not test runtime dependencies.
+
+```bash
+.agents/skills/overlay-tools/bin/test-ebuild --build \
+  --overlay-path /path/to/pr-checkout \
+  --expect opt/t3code-nightly-bin/t3code \
+  --expect usr/bin/t3code \
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609272344.ebuild
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `EBUILD` | Exact `category/package/package-version.ebuild` path (required) |
+| `--overlay-path PATH` | Overlay checkout to mount read-only (default: this repo) |
+| `--build` | Rebuild the image with a fresh stage3 and Portage snapshot |
+| `--expect STAGED_PATH` | Require a relative path in the install image (repeatable) |
+
+Build once (`--build`); subsequent calls reuse the local Docker image and exit 2
+if it is missing. `docker/run-ebuild` is mounted from the checkout on each run,
+so script changes do not need a rebuild. Use an
+explicit PR checkout path rather than whichever branch happens to be current.
+The overlay is bind-mounted read-only; Portage's distfiles, workdir and image
+are ephemeral. An exit code of zero means fetch/Manifest validation and
+unpack→install phases succeeded and the requested staged paths exist. It does
+**not** prove that RDEPEND is complete, the package is installed, or its GUI
+runs. A bare stage3 may report unresolved sonames for dependencies that would
+be supplied by a real `emerge`. Build phases run without Portage's network
+sandbox, so network access during `src_compile` is not caught. Only run trusted
+ebuilds: Docker does not make untrusted build scripts safe.
+
+**Exit Codes:** `0` = phases and assertions passed, `1` = build dependencies
+failed to install, or a phase or assertion failed, `2` = invalid arguments or
+overlay, missing Docker, image not built or failed to build, or container setup
+failure (repos.conf, overlay registration), `127` = `uv` is not installed. Other
+non-zero codes come from `docker run` itself (e.g. `137` if the container is
+killed).
+
 ## Requirements
 
 - **uv** - Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **Docker** (`test-ebuild` only) - https://docs.docker.com/engine/install/
 
 ## Environment Variables
 
@@ -111,8 +156,9 @@ Bump ebuild versions with optional PR automation.
 1. Run `check-updates` to find outdated packages
 2. Run `update-ebuild --pr` to bump version and create PR
 3. Or manually: `update-ebuild -v X.Y.Z category/package`
-4. Test: `emerge -1v category/package`
-5. QA: `pkgcheck scan category/package`
+4. Phase-test the exact ebuild: `test-ebuild --overlay-path /path/to/pr-checkout category/package/package-version.ebuild` (add `--build` on first use)
+5. Test: `emerge -1v category/package`
+6. QA: `pkgcheck scan category/package`
 
 ## Version Format Reference
 
