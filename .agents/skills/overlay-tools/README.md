@@ -43,15 +43,17 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 .agents/skills/overlay-tools/bin/test-ebuild --build \
   --overlay-path /path/to/pr-checkout \
   --expect usr/bin/t3code \
-  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609282375.ebuild
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609272344.ebuild
 
 # Subsequent tests reuse the image and can target any overlay checkout.
 .agents/skills/overlay-tools/bin/test-ebuild \
   --overlay-path /path/to/pr-checkout \
-  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609282375.ebuild
+  dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609272344.ebuild
 ```
 
-`--build` creates `turbo-overlay/ebuild-test:local` (subsequent runs reuse it).
+`--build` creates `turbo-overlay/ebuild-test:local` from a freshly pulled
+stage3 and Portage snapshot (`--pull --no-cache`); subsequent runs reuse it.
+The image intentionally tracks `latest`, so results can shift between rebuilds.
 The checkout is mounted read-only. Portage fetches the distfile, validates the
 Manifest, and runs `unpack`, `prepare`, `configure`, `compile`, and `install` into
 a disposable container image directory. Repeat `--expect RELATIVE/PATH` to

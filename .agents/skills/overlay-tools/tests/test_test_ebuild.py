@@ -19,6 +19,7 @@ def overlay(tmp_path: Path) -> Path:
 
 def test_validates_exact_ebuild_path(tmp_path: Path) -> None:
     root = overlay(tmp_path)
+    (root / "dev-util/t3code-nightly-bin/different-1.ebuild").write_text("EAPI=8\n")
     test_ebuild.validate_ebuild(root, "dev-util/t3code-nightly-bin/t3code-nightly-bin-1.ebuild")
     for bad in (
         "dev-util/t3code-nightly-bin",
@@ -62,7 +63,10 @@ def test_build_and_run_mount_readonly(monkeypatch: pytest.MonkeyPatch, tmp_path:
         )
         == 0
     )
-    assert calls[0][:4] == ["docker", "build", "-t", test_ebuild.IMAGE]
+    assert calls[0][:2] == ["docker", "build"]
+    assert {"--pull", "--no-cache"} <= set(calls[0])
+    assert calls[0][calls[0].index("--platform") + 1] == "linux/amd64"
+    assert calls[0][calls[0].index("-t") + 1] == test_ebuild.IMAGE
     assert calls[1][:5] == ["docker", "run", "--rm", "--platform", "linux/amd64"]
     assert calls[1][5:7] == [
         "--mount",
@@ -74,8 +78,16 @@ def test_build_and_run_mount_readonly(monkeypatch: pytest.MonkeyPatch, tmp_path:
     ]
 
 
-def test_refuses_invalid_expected_path_before_docker(tmp_path: Path) -> None:
+def test_refuses_invalid_expected_path_before_docker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     root = overlay(tmp_path)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        test_ebuild.subprocess,
+        "run",
+        lambda cmd, **kwargs: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
+    )
     with pytest.raises(SystemExit) as exc:
         test_ebuild.main(
             [
@@ -83,6 +95,50 @@ def test_refuses_invalid_expected_path_before_docker(tmp_path: Path) -> None:
                 str(root),
                 "--expect",
                 "../../etc/passwd",
+                "dev-util/t3code-nightly-bin/t3code-nightly-bin-1.ebuild",
+            ]
+        )
+    assert exc.value.code == 2
+    assert calls == []
+
+
+def test_build_failure_exits_cleanly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root = overlay(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1)
+
+    monkeypatch.setattr(test_ebuild.subprocess, "run", fake_run)
+    with pytest.raises(SystemExit) as exc:
+        test_ebuild.main(
+            [
+                "--overlay-path",
+                str(root),
+                "--build",
+                "dev-util/t3code-nightly-bin/t3code-nightly-bin-1.ebuild",
+            ]
+        )
+    assert exc.value.code == 2
+    assert len(calls) == 1
+
+
+def test_build_without_docker_exits_cleanly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = overlay(tmp_path)
+
+    def missing_docker(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(test_ebuild.subprocess, "run", missing_docker)
+    with pytest.raises(SystemExit) as exc:
+        test_ebuild.main(
+            [
+                "--overlay-path",
+                str(root),
+                "--build",
                 "dev-util/t3code-nightly-bin/t3code-nightly-bin-1.ebuild",
             ]
         )

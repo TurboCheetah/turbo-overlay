@@ -54,7 +54,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.build:
         context = TOOLS_ROOT / "docker"
-        subprocess.run(["docker", "build", "-t", args.image, str(context)], check=True)
+        build = [
+            "docker",
+            "build",
+            "--pull",
+            "--no-cache",
+            "--platform",
+            "linux/amd64",
+            "-t",
+            args.image,
+            str(context),
+        ]
+        try:
+            result = subprocess.run(build, check=False)
+        except FileNotFoundError:
+            parser.error("Docker is not installed")
+        if result.returncode != 0:
+            parser.error(f"docker build failed with exit code {result.returncode}")
 
     cmd = [
         "docker",

@@ -1,5 +1,7 @@
 # Disposable Gentoo stage3 environment for overlay ebuild phase tests.
-FROM gentoo/stage3:latest
+# Intentionally tracks the latest stage3 and Portage snapshot; `test-ebuild
+# --build` rebuilds with --pull --no-cache to refresh both.
+FROM --platform=linux/amd64 gentoo/stage3:latest
 
 RUN emerge-webrsync
 
