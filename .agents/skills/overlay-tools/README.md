@@ -52,9 +52,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 `--build` creates `turbo-overlay/ebuild-test:local` from a freshly pulled
-stage3 and Portage snapshot (`--pull --no-cache`); subsequent runs reuse it.
-The image intentionally tracks `latest`, so results can shift between rebuilds.
-The checkout is mounted read-only. Portage fetches the distfile, validates the
+stage3 and Portage snapshot (`--pull --no-cache`); subsequent runs reuse it,
+and fail with exit 2 if it has not been built. The image intentionally tracks
+`latest`, so results can shift between rebuilds. The checkout and
+`docker/run-ebuild` are mounted read-only on every run, so script changes apply
+without a rebuild. Build dependencies (`DEPEND`/`BDEPEND`, e.g. Go for
+`go-module` ebuilds) are emerged from the Gentoo tree first. Portage fetches the distfile, validates the
 Manifest, and runs `unpack`, `prepare`, `configure`, `compile`, and `install` into
 a disposable container image directory. Repeat `--expect RELATIVE/PATH` to
 assert paths exist in that staging image; a final symlink counts as present
@@ -73,14 +76,14 @@ Docker is not a sandbox for hostile package code.
 ```bash
 cd .agents/skills/overlay-tools
 
-# Run tests
-uv run pytest
+# Install dev tools (pytest, ruff, ty, pre-commit)
+uv sync --group dev
 
-# Run with dev dependencies
-uv run --extra dev pytest -v
-
-# Type check (if basedpyright is installed)
-uv run basedpyright src/
+# Lint, format, type check, test
+uv run ruff check .
+uv run ruff format .
+uv run ty check src
+uv run pytest -q
 ```
 
 

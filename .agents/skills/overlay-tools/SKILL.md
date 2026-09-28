@@ -100,7 +100,8 @@ Bump ebuild versions with optional PR automation.
 ### test-ebuild
 
 Run a specific version through real Portage phases in a disposable Gentoo
-container. This is not a host `emerge` and does not test runtime dependencies.
+container. Build dependencies are emerged inside the container first. This is
+not a host `emerge` and does not test runtime dependencies.
 
 ```bash
 .agents/skills/overlay-tools/bin/test-ebuild --build \
@@ -119,7 +120,9 @@ container. This is not a host `emerge` and does not test runtime dependencies.
 | `--build` | Rebuild the image with a fresh stage3 and Portage snapshot |
 | `--expect STAGED_PATH` | Require a relative path in the install image (repeatable) |
 
-Build once (`--build`); subsequent calls reuse the local Docker image. Use an
+Build once (`--build`); subsequent calls reuse the local Docker image and exit 2
+if it is missing. `docker/run-ebuild` is mounted from the checkout on each run,
+so script changes do not need a rebuild. Use an
 explicit PR checkout path rather than whichever branch happens to be current.
 The overlay is bind-mounted read-only; Portage's distfiles, workdir and image
 are ephemeral. An exit code of zero means fetch/Manifest validation and
@@ -131,9 +134,11 @@ sandbox, so network access during `src_compile` is not caught. Only run trusted
 ebuilds: Docker does not make untrusted build scripts safe.
 
 **Exit Codes:** `0` = phases and assertions passed, `1` = phase or assertion
-failure, `2` = invalid arguments or overlay, missing Docker, failed image
-build, or unusable stage3, `127` = `uv` is not installed. Other non-zero codes come from `docker run`
-itself (e.g. `125` when the Docker daemon is unreachable).
+failure, `2` = invalid arguments or overlay, missing Docker, image not built or
+failed to build, container setup failure (repos.conf, overlay registration) or
+build dependencies that failed to install, `127` = `uv` is not installed. Other
+non-zero codes come from `docker run` itself (e.g. `137` if the container is
+killed).
 
 ## Requirements
 
@@ -151,7 +156,7 @@ itself (e.g. `125` when the Docker daemon is unreachable).
 1. Run `check-updates` to find outdated packages
 2. Run `update-ebuild --pr` to bump version and create PR
 3. Or manually: `update-ebuild -v X.Y.Z category/package`
-4. Phase-test the exact ebuild: `test-ebuild category/package/package-version.ebuild`
+4. Phase-test the exact ebuild: `test-ebuild --overlay-path /path/to/pr-checkout category/package/package-version.ebuild` (add `--build` on first use)
 5. Test: `emerge -1v category/package`
 6. QA: `pkgcheck scan category/package`
 

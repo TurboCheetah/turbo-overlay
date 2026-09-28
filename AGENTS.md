@@ -77,7 +77,7 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 ### Phase-Test an Ebuild (Docker)
 
 ```bash
-# First run builds the disposable stage3 image; later runs reuse it
+# --build (re)builds the stage3 image from scratch; omit it to reuse the image
 .agents/skills/overlay-tools/bin/test-ebuild --build \
   --expect usr/bin/t3code \
   dev-util/t3code-nightly-bin/t3code-nightly-bin-0.0.43_pre202609272344.ebuild
@@ -87,8 +87,8 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
   category/package/package-version.ebuild
 ```
 
-Runs fetch/Manifest validation and unpack→install only; it does not install
-runtime dependencies or run the app. Only use it on trusted ebuilds.
+Installs build dependencies, then runs fetch/Manifest validation and
+unpack→install; it does not install runtime dependencies or run the app. Only use it on trusted ebuilds.
 
 ### Automated Updates (GitHub Actions)
 

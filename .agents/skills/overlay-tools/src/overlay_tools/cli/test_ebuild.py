@@ -18,15 +18,20 @@ EXIT_ENVIRONMENT = 2
 DOCKER_TAG = "turbo-overlay/ebuild-test:local"
 DOCKER_PLATFORM = ["--platform", "linux/amd64"]
 CONTAINER_REPO = "/var/db/repos/turbo-overlay"
+CONTAINER_SCRIPT = "/usr/local/bin/run-ebuild"
 EBUILD_PATH = re.compile(r"^[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+\.ebuild$")
 STAGED_PATH = re.compile(r"^[A-Za-z0-9+_.-]+(/[A-Za-z0-9+_.-]+)*$")
 TOOLS_ROOT = Path(__file__).resolve().parents[3]
 
 
-def validate_overlay(overlay: Path) -> None:
+def bind_mount(src: Path, dst: str) -> str:
     # docker --mount parses its value as CSV, so these would split or quote the spec.
-    if any(char in str(overlay) for char in ',"'):
-        raise ValueError(f"overlay path cannot contain a comma or double quote: {overlay}")
+    if any(char in str(src) for char in ',"'):
+        raise ValueError(f"mount path cannot contain a comma or double quote: {src}")
+    return f"type=bind,src={src},dst={dst},readonly"
+
+
+def validate_overlay(overlay: Path) -> None:
     if not (overlay / "profiles/repo_name").is_file():
         raise ValueError(f"not a Gentoo overlay: {overlay}")
 
@@ -72,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         validate_ebuild(overlay, args.ebuild)
         for path in args.expect:
             validate_staged_path(path)
+        mounts = [
+            bind_mount(overlay, CONTAINER_REPO),
+            bind_mount(TOOLS_ROOT / "docker/run-ebuild", CONTAINER_SCRIPT),
+        ]
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -89,14 +98,21 @@ def main(argv: list[str] | None = None) -> int:
         if result.returncode != 0:
             log.error(f"docker build failed with exit code {result.returncode}")
             return EXIT_ENVIRONMENT
+    else:
+        # Without this, docker run would try to pull the local-only tag from a registry.
+        result = run(["docker", "image", "inspect", DOCKER_TAG], check=False)
+        if result.returncode != 0:
+            log.error(f"Docker image {DOCKER_TAG} unavailable (rerun with --build)")
+            if result.stderr.strip():
+                log.error(result.stderr.strip())
+            return EXIT_ENVIRONMENT
 
     cmd = [
         "docker",
         "run",
         "--rm",
         *DOCKER_PLATFORM,
-        "--mount",
-        f"type=bind,src={overlay},dst={CONTAINER_REPO},readonly",
+        *(arg for mount in mounts for arg in ("--mount", mount)),
         "--env",
         f"OVERLAY_REPO={CONTAINER_REPO}",
         DOCKER_TAG,

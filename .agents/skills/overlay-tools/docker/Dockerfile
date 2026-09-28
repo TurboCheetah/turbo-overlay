@@ -5,7 +5,6 @@ FROM --platform=linux/amd64 gentoo/stage3:latest
 
 RUN emerge-webrsync
 
-COPY run-ebuild /usr/local/bin/run-ebuild
-RUN chmod 0755 /usr/local/bin/run-ebuild
-
-ENTRYPOINT ["/usr/local/bin/run-ebuild"]
+# test-ebuild bind-mounts the checkout's run-ebuild here on every run, so the
+# image never carries a stale copy of the script.
+ENTRYPOINT ["bash", "/usr/local/bin/run-ebuild"]
