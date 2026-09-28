@@ -15,9 +15,11 @@ repo = repo if isinstance(repo, dict) else {}
 pr = payload.get("pull_request")
 pr = pr if isinstance(pr, dict) else {}
 number = pr.get("number")
+action = payload.get("action")
 if (
     repo.get("full_name") != "TurboCheetah/turbo-overlay"
-    or payload.get("action") not in {"opened", "reopened", "synchronize"}
+    or not isinstance(action, str)
+    or action not in {"opened", "reopened", "synchronize"}
     or type(number) is not int
     or number < 1
 ):
@@ -28,7 +30,7 @@ else:
             {
                 "repo": "TurboCheetah/turbo-overlay",
                 "number": number,
-                "action": payload["action"],
+                "action": action,
             }
         )
     )

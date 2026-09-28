@@ -239,6 +239,24 @@ class WebhookFilterTests(unittest.TestCase):
             output = json.loads(result.stdout)
             self.assertTrue(output.get("__hermes_ignore__", False), bad)
 
+    def test_non_string_action_fails_closed(self):
+        path = ROOT / "turbo_overlay_pr_autopilot_filter.py"
+        for action in (["edited"], {"nested": True}, 7):
+            event = {
+                "action": action,
+                "repository": {"full_name": gate.REPO},
+                "pull_request": {"number": 102},
+            }
+            result = subprocess.run(
+                [sys.executable, str(path)],
+                input=json.dumps(event),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            output = json.loads(result.stdout)
+            self.assertTrue(output.get("__hermes_ignore__", False), action)
+
 
 class MonitorTests(unittest.TestCase):
     def test_new_pr_snapshot_is_stable_and_does_not_include_raw_bot_text(self):

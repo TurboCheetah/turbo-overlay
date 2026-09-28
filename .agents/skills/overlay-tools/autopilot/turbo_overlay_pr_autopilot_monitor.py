@@ -39,7 +39,9 @@ def snapshot():
         "--limit",
         "500",
         "--json",
-        "number,headRefOid,baseRefName,mergeable,reviewDecision,headRepositoryOwner,author,isDraft,statusCheckRollup,latestReviews,comments",
+        "number,headRefOid,baseRefName,mergeable,reviewDecision,"
+        "headRepositoryOwner,author,isDraft,statusCheckRollup,"
+        "latestReviews,comments",
     )
     output = []
     for pr in sorted(prs, key=lambda p: p["number"]):
