@@ -131,7 +131,9 @@ sandbox, so network access during `src_compile` is not caught. Only run trusted
 ebuilds: Docker does not make untrusted build scripts safe.
 
 **Exit Codes:** `0` = phases and assertions passed, `1` = phase or assertion
-failure, `2` = invalid arguments, missing Docker, or failed image build
+failure, `2` = invalid arguments, missing Docker, or failed image build,
+`127` = `uv` is not installed. Other non-zero codes come from `docker run`
+itself (e.g. `125` when the Docker daemon is unreachable).
 
 ## Requirements
 
