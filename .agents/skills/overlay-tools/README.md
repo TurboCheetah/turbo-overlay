@@ -57,7 +57,12 @@ The image intentionally tracks `latest`, so results can shift between rebuilds.
 The checkout is mounted read-only. Portage fetches the distfile, validates the
 Manifest, and runs `unpack`, `prepare`, `configure`, `compile`, and `install` into
 a disposable container image directory. Repeat `--expect RELATIVE/PATH` to
-assert installed files exist. Exit nonzero on any phase or assertion failure.
+assert paths exist in that staging image; a final symlink counts as present
+even if its absolute target only exists on an installed system. Exit nonzero
+on any phase or assertion failure.
+Portage's network sandbox cannot run in an unprivileged container, so build
+phases have network access; an ebuild that downloads during `src_compile`
+passes here but fails under a real `emerge`.
 It does **not** install runtime dependencies, run the GUI, or prove the package
 works on a real desktop; missing-library QA notices from a bare stage3 need
 confirmation after a full dependency install. Only test trusted ebuilds:
@@ -83,9 +88,14 @@ uv run basedpyright src/
 
 ```
 overlay-tools/
+├── bin/                        # check-updates, update-ebuild, test-ebuild wrappers
+├── docker/
+│   ├── Dockerfile              # Gentoo stage3 image for test-ebuild
+│   └── run-ebuild              # Container entrypoint: Portage phases + assertions
 ├── src/overlay_tools/
 │   ├── cli/
 │   │   ├── check_updates.py    # check-updates CLI
+│   │   ├── test_ebuild.py      # test-ebuild CLI
 │   │   └── update_ebuild.py    # update-ebuild CLI
 │   └── core/
 │       ├── ebuilds.py          # Ebuild parsing

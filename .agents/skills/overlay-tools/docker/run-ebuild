@@ -3,57 +3,101 @@ set -euo pipefail
 
 # The host mounts the checkout read-only. All Portage build/fetch state stays
 # inside this disposable container, not on the maintainer's Gentoo system.
-path=${1:?usage: run-ebuild category/package/package-version.ebuild [expected-image-path ...]}
-shift
-if [[ ! ${path} =~ ^[a-zA-Z0-9+_.-]+/[a-zA-Z0-9+_.-]+/[a-zA-Z0-9+_.-]+\.ebuild$ ]]; then
-    echo "Invalid ebuild path: ${path}" >&2
-    exit 2
+
+usage="usage: run-ebuild category/package/package-version.ebuild [staged-path ...]"
+name_chars='[a-zA-Z0-9+_.-]+'
+
+valid_ebuild_path() {
+    [[ ${1} =~ ^${name_chars}/${name_chars}/${name_chars}\.ebuild$ ]]
+}
+
+valid_staged_path() {
+    local path=${1}
+    [[ ${path} =~ ^${name_chars}(/${name_chars})*$ ]] || return 1
+    [[ /${path}/ != */../* && /${path}/ != */./* ]]
+}
+
+# Portage stages installs under ${PORTAGE_TMPDIR}/portage/${CATEGORY}/${PF}/image.
+image_dir_for() {
+    local path=${1} category rest package pf
+    category=${path%%/*}
+    rest=${path#*/}
+    package=${rest%%/*}
+    pf=${rest#*/}
+    pf=${pf%.ebuild}
+    [[ ${pf} == "${package}"-* ]] || return 1
+    printf '%s/portage/%s/%s/image\n' "${PORTAGE_TMPDIR:-/var/tmp}" "${category}" "${pf}"
+}
+
+# Parent directories must be real directories: an absolute symlink there would
+# resolve against the container root instead of the staging image. The final
+# component may be a symlink whose target only exists on the installed system.
+staged_path_exists() {
+    local image=${1} path=${2} current=${1} component
+    local -a components
+    IFS=/ read -ra components <<< "${path}"
+    for component in "${components[@]:0:${#components[@]}-1}"; do
+        current=${current}/${component}
+        [[ -d ${current} && ! -L ${current} ]] || return 1
+    done
+    current=${image}/${path}
+    [[ -e ${current} || -L ${current} ]]
+}
+
+write_repos_conf() {
+    mkdir -p /etc/portage/repos.conf
+    cat > /etc/portage/repos.conf/turbo-overlay.conf <<-EOF
+	[DEFAULT]
+	main-repo = gentoo
+
+	[gentoo]
+	location = /var/db/repos/gentoo
+
+	[turbo-overlay]
+	location = ${1}
+	masters = gentoo
+	auto-sync = no
+	EOF
+}
+
+main() {
+    local path=${1:?${usage}}
+    shift
+    local repo=${OVERLAY_REPO:?OVERLAY_REPO must name the mounted overlay}
+    local expected image
+
+    valid_ebuild_path "${path}" || { echo "Invalid ebuild path: ${path}" >&2; exit 2; }
+    for expected in "$@"; do
+        valid_staged_path "${expected}" \
+            || { echo "Invalid staged path: ${expected}" >&2; exit 2; }
+    done
+    image=$(image_dir_for "${path}") \
+        || { echo "Ebuild filename does not match package: ${path}" >&2; exit 2; }
+    [[ -f ${repo}/${path} ]] || { echo "Missing ebuild: ${path}" >&2; exit 2; }
+    [[ -f ${repo}/profiles/repo_name ]] || { echo "Not a Gentoo overlay: ${repo}" >&2; exit 2; }
+    [[ -e /etc/portage/make.profile ]] || { echo "Stage3 has no make.profile" >&2; exit 2; }
+
+    write_repos_conf "${repo}"
+    # Unprivileged Docker containers cannot create the namespaces those Portage
+    # sandbox modes need. Keep Portage's filesystem sandbox enabled.
+    export FEATURES='-ipc-sandbox -network-sandbox -pid-sandbox'
+
+    printf 'Testing %s in %s\n' "${path}" "$(portageq get_repo_path / turbo-overlay)"
+    # Real Portage phases, including fetch+Manifest verification and install
+    # into the staging image. Runtime dependencies are not resolved or built.
+    ebuild "${repo}/${path}" clean fetch unpack prepare configure compile install
+
+    [[ -d ${image} ]] || { echo "Missing Portage install image: ${image}" >&2; exit 1; }
+    for expected in "$@"; do
+        if ! staged_path_exists "${image}" "${expected}"; then
+            echo "Missing staged path: ${expected}" >&2
+            exit 1
+        fi
+        printf 'OK: staged %s\n' "${expected}"
+    done
+    printf 'PASS: Portage phases completed; install image at %s\n' "${image}"
+}
+
+if [[ ${BASH_SOURCE[0]} == "${0}" ]]; then
+    main "$@"
 fi
-
-repo=/var/db/repos/turbo-overlay
-ebuild_file="${repo}/${path}"
-[[ -f ${ebuild_file} ]] || { echo "Missing ebuild: ${path}" >&2; exit 2; }
-[[ -f ${repo}/profiles/repo_name ]] || { echo "Not a Gentoo overlay: ${repo}" >&2; exit 2; }
-
-mkdir -p /etc/portage/repos.conf
-printf '[DEFAULT]\nmain-repo = gentoo\n\n[gentoo]\nlocation = /var/db/repos/gentoo\n\n[turbo-overlay]\nlocation = %s\nmasters = gentoo\nauto-sync = no\n' "${repo}" > /etc/portage/repos.conf/turbo-overlay.conf
-
-# Stage3 does not have a user-configured amd64 profile. Use the official
-# repository's amd64 profile so Portage selects the correct eclasses/USE defaults.
-[[ -e /etc/portage/make.profile ]] || ln -s /var/db/repos/gentoo/profiles/default/linux/amd64/23.0 /etc/portage/make.profile
-export ACCEPT_KEYWORDS='~amd64'
-# Unprivileged Docker containers cannot create the namespaces those Portage
-# sandbox modes need. Keep Portage's filesystem sandbox enabled.
-export FEATURES='-ipc-sandbox -network-sandbox -pid-sandbox'
-
-printf 'Testing %s in %s\n' "${path}" "$(portageq get_repo_path / turbo-overlay)"
-# Run real Portage phases, including fetch+Manifest verification and install
-# into the staging image. This does NOT resolve/build runtime dependencies or
-# install the package into the container root; those need a full emerge test.
-ebuild "${ebuild_file}" clean fetch unpack prepare configure compile install
-
-category=${path%%/*}
-rest=${path#*/}
-package=${rest%%/*}
-version=${rest#*/}
-version=${version#"${package}"-}
-version=${version%.ebuild}
-image="/var/tmp/portage/${category}/${package}-${version}/image"
-[[ -d ${image} ]] || { echo "Missing Portage install image: ${image}" >&2; exit 1; }
-if [[ -z $(find "${image}" -mindepth 1 -print -quit) ]]; then
-    echo "Portage install image is empty: ${image}" >&2
-    exit 1
-fi
-for expected in "$@"; do
-    if [[ ! ${expected} =~ ^[a-zA-Z0-9+_.-]+(/[a-zA-Z0-9+_.-]+)*$ || ${expected} == . || ${expected} == .. || /${expected}/ == */../* || /${expected}/ == */./* ]]; then
-        echo "Invalid expected image path: ${expected}" >&2
-        exit 2
-    fi
-    # Absolute symlinks refer to the installed root, not this staging directory.
-    if [[ ! -e ${image}/${expected} && ! -L ${image}/${expected} ]]; then
-        echo "Missing expected image path: ${expected}" >&2
-        exit 1
-    fi
-    printf 'OK: staged %s\n' "${expected}"
-done
-printf 'PASS: Portage phases completed; install image has content at %s\n' "${image}"
