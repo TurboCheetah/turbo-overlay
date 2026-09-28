@@ -8,9 +8,13 @@ from pathlib import Path
 
 from overlay_tools.core.ebuilds import parse_ebuild_filename
 from overlay_tools.core.errors import EbuildParseError, ExternalToolMissingError
+from overlay_tools.core.logging import Logger
 from overlay_tools.core.overlay import find_overlay_root
 from overlay_tools.core.subprocess_utils import require_tool, run
 
+# 1 is reserved for ebuild phase/assertion failures, so an environment that
+# cannot run the test gets a distinct code.
+EXIT_ENVIRONMENT = 2
 DOCKER_TAG = "turbo-overlay/ebuild-test:local"
 DOCKER_PLATFORM = ["--platform", "linux/amd64"]
 CONTAINER_REPO = "/var/db/repos/turbo-overlay"
@@ -68,16 +72,23 @@ def main(argv: list[str] | None = None) -> int:
         validate_ebuild(overlay, args.ebuild)
         for path in args.expect:
             validate_staged_path(path)
-        require_tool("docker", "https://docs.docker.com/engine/install/")
-    except (ValueError, ExternalToolMissingError) as exc:
+    except ValueError as exc:
         parser.error(str(exc))
+
+    log = Logger()
+    try:
+        require_tool("docker", "https://docs.docker.com/engine/install/")
+    except ExternalToolMissingError as exc:
+        log.error(str(exc))
+        return EXIT_ENVIRONMENT
 
     if args.build:
         context = TOOLS_ROOT / "docker"
         build = ["docker", "build", "--pull", "--no-cache", *DOCKER_PLATFORM, "-t", DOCKER_TAG]
         result = run([*build, str(context)], check=False, capture=False)
         if result.returncode != 0:
-            parser.error(f"docker build failed with exit code {result.returncode}")
+            log.error(f"docker build failed with exit code {result.returncode}")
+            return EXIT_ENVIRONMENT
 
     cmd = [
         "docker",

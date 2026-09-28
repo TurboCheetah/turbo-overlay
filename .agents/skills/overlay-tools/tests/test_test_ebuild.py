@@ -112,13 +112,13 @@ def test_refuses_invalid_expected_path_before_docker(
 def test_build_failure_exits_cleanly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = overlay(tmp_path)
     calls = fake_docker(monkeypatch, returncode=1)
-    with pytest.raises(SystemExit) as exc:
-        test_ebuild.main(["--overlay-path", str(root), "--build", EBUILD])
-    assert exc.value.code == 2
+    assert test_ebuild.main(["--overlay-path", str(root), "--build", EBUILD]) == 2
     assert len(calls) == 1
 
 
-def test_missing_docker_exits_cleanly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_missing_docker_exits_cleanly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = overlay(tmp_path)
     calls = fake_docker(monkeypatch)
 
@@ -126,10 +126,11 @@ def test_missing_docker_exits_cleanly(monkeypatch: pytest.MonkeyPatch, tmp_path:
         raise ExternalToolMissingError("docker")
 
     monkeypatch.setattr(test_ebuild, "require_tool", missing)
-    with pytest.raises(SystemExit) as exc:
-        test_ebuild.main(["--overlay-path", str(root), "--build", EBUILD])
-    assert exc.value.code == 2
+    assert test_ebuild.main(["--overlay-path", str(root), "--build", EBUILD]) == 2
     assert calls == []
+    output = capsys.readouterr()
+    assert "Required tool not found: docker" in output.out + output.err
+    assert "usage:" not in output.out + output.err
 
 
 def test_returns_container_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
