@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Pass only new same-repository PR events to the review job."""
+"""Pass only turbo-overlay PR open/update events to the review job.
+
+Fork PRs pass too: they get a read-only review, and the merge gate refuses them.
+"""
 
 import json
 import sys

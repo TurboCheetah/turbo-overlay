@@ -89,8 +89,9 @@ def snapshot():
             "pageInfo { hasNextPage } } } } }",
         )
         thread_data = threads["data"]["repository"]["pullRequest"]["reviewThreads"]
-        if thread_data["pageInfo"]["hasNextPage"]:
-            raise RuntimeError(f"PR #{pr['number']} has >100 review threads; manual review needed")
+        # Flag an oversized PR instead of failing the sweep for every other PR;
+        # the merge gate independently refuses unenumerated threads.
+        threads_truncated = thread_data["pageInfo"]["hasNextPage"]
         thread_state = sorted(f"{t['id']}:{int(t['isResolved'])}" for t in thread_data["nodes"])
         output.append(
             {
@@ -107,6 +108,7 @@ def snapshot():
                 "bot_comments": comments,
                 "unresolved_threads": sum(not t["isResolved"] for t in thread_data["nodes"]),
                 "threads_digest": digest(";".join(thread_state)),
+                "threads_truncated": threads_truncated,
             }
         )
     return {"repository": REPO, "prs": output}
@@ -115,6 +117,6 @@ def snapshot():
 if __name__ == "__main__":
     try:
         print(json.dumps(snapshot(), sort_keys=True, separators=(",", ":")))
-    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         print(f"PR monitor failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

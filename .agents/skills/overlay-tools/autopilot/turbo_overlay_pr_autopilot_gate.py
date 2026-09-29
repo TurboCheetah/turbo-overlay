@@ -9,6 +9,9 @@ import subprocess
 REPO = "TurboCheetah/turbo-overlay"
 ALLOWED = {"TurboCheetah", "overlay-bot[bot]"}
 BOTS = {"coderabbitai", "cubic-dev-ai"}
+# CodeRabbit wraps its rate-limit notice in an HTML marker comment. Match the
+# marker, not free text: its edited summary comment can quote code or old notes.
+RABBIT_RATE_LIMIT = re.compile(r"<!--[^>]*rate limit[^>]*coderabbit\.ai[^>]*-->", re.IGNORECASE)
 
 
 def gh(*args):
@@ -59,12 +62,19 @@ def inspect(number, expected_head):
         gh("api", f"repos/{REPO}/pulls/{number}/reviews", "--paginate", "--slurp")
     )
     latest = {}
+    verdicts = {}
     for review in reviews:
-        user = review["user"]["login"].lower().removesuffix("[bot]")
+        login = (review.get("user") or {}).get("login") or "ghost"
+        user = login.lower().removesuffix("[bot]")
         if user in BOTS:
             latest[user] = review
-        if review["state"] == "CHANGES_REQUESTED" and review["commit_id"] == head:
-            reasons.append(f"changes requested on current head by {review['user']['login']}")
+        # GitHub keeps a request for changes in force across later commits until
+        # the reviewer approves or it is dismissed; comments do not clear it.
+        if review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            verdicts[login] = review["state"]
+    for login, state in sorted(verdicts.items()):
+        if state == "CHANGES_REQUESTED":
+            reasons.append(f"changes requested by {login} and not approved or dismissed")
     for bot in BOTS:
         review = latest.get(bot)
         if (
@@ -81,16 +91,15 @@ def inspect(number, expected_head):
     )
     rabbit = latest.get("coderabbitai")
     for comment in comments:
-        user = comment["user"]["login"].lower().removesuffix("[bot]")
-        if user == "coderabbitai" and rabbit:
-            text = (comment.get("body") or "").lower()
-            if ("skip review" in text or "rate limit" in text) and comment["updated_at"] >= rabbit[
-                "submitted_at"
-            ]:
-                reasons.append(
-                    "CodeRabbit status comment says the current review was skipped or rate-limited"
-                )
-                break
+        user = ((comment.get("user") or {}).get("login") or "").lower().removesuffix("[bot]")
+        if (
+            user == "coderabbitai"
+            and rabbit
+            and comment["updated_at"] >= rabbit["submitted_at"]
+            and RABBIT_RATE_LIMIT.search(comment.get("body") or "")
+        ):
+            reasons.append("CodeRabbit posted a rate-limit notice after its latest review")
+            break
 
     threads = gh(
         "api",
@@ -125,7 +134,7 @@ def main():
         parser.error("invalid PR number or head SHA")
     try:
         reasons, head = inspect(args.number, args.expected_head)
-    except (KeyError, ValueError, subprocess.SubprocessError, RuntimeError) as exc:
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"BLOCKED: could not verify every gate: {exc}")
         return 1
     if reasons:
@@ -156,7 +165,7 @@ def main():
             timeout=90,
         )
         merged = gh("api", f"repos/{REPO}/pulls/{args.number}")
-    except (subprocess.SubprocessError, KeyError, ValueError) as exc:
+    except (subprocess.SubprocessError, KeyError, TypeError, ValueError, OSError) as exc:
         print(f"BLOCKED: merge or read-back failed: {exc}")
         return 1
     if not merged.get("merged") or merged["head"]["sha"] != head:

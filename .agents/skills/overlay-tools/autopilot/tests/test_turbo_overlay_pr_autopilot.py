@@ -31,7 +31,8 @@ def fixture(
     review_head=SHA,
     failed_check=False,
     unresolved=False,
-    skipped_comment=False,
+    rabbit_comment=None,
+    human_reviews=(),
     draft=False,
     state="open",
     mergeable_state="clean",
@@ -70,15 +71,19 @@ def fixture(
         }
         for name in ("coderabbitai[bot]", "cubic-dev-ai[bot]")
     ]
+    reviews = [
+        {"user": user, "commit_id": commit, "state": state, "body": ""}
+        for user, commit, state in human_reviews
+    ] + reviews
     comments = (
         [
             {
                 "user": {"login": "coderabbitai[bot]"},
-                "body": "skip review",
+                "body": rabbit_comment,
                 "updated_at": "2026-09-28T17:02:00Z",
             }
         ]
-        if skipped_comment
+        if rabbit_comment is not None
         else []
     )
     threads = {
@@ -135,8 +140,48 @@ class MergeGateTests(unittest.TestCase):
     def test_unresolved_thread_blocks(self):
         self.assertTrue(any("unresolved" in r for r in self.check(unresolved=True)))
 
-    def test_skipped_status_comment_blocks(self):
-        self.assertTrue(any("status comment" in r for r in self.check(skipped_comment=True)))
+    def test_rate_limit_marker_after_review_blocks(self):
+        body = "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->"
+        self.assertTrue(any("rate-limit" in r for r in self.check(rabbit_comment=body)))
+
+    def test_stale_skip_block_does_not_block_current_head_review(self):
+        # The edited summary comment keeps its skip block after a manual full review.
+        body = (
+            "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n"
+            "Review skipped. This code discusses a rate limit and skip review.\n"
+            "<!-- end of auto-generated comment: skip review by coderabbit.ai -->"
+        )
+        self.assertEqual(self.check(rabbit_comment=body), [])
+
+    def test_stale_human_changes_request_blocks(self):
+        reviews = [({"login": "TurboCheetah"}, "b" * 40, "CHANGES_REQUESTED")]
+        reasons = self.check(human_reviews=reviews)
+        self.assertTrue(any("changes requested by TurboCheetah" in r for r in reasons))
+
+    def test_later_comment_does_not_clear_changes_request(self):
+        reviews = [
+            ({"login": "TurboCheetah"}, "b" * 40, "CHANGES_REQUESTED"),
+            ({"login": "TurboCheetah"}, SHA, "COMMENTED"),
+        ]
+        self.assertTrue(any("changes requested" in r for r in self.check(human_reviews=reviews)))
+
+    def test_approval_or_dismissal_clears_changes_request(self):
+        for later in ("APPROVED", "DISMISSED"):
+            reviews = [
+                ({"login": "TurboCheetah"}, "b" * 40, "CHANGES_REQUESTED"),
+                ({"login": "TurboCheetah"}, SHA, later),
+            ]
+            self.assertEqual(self.check(human_reviews=reviews), [], later)
+
+    def test_deleted_reviewer_does_not_crash(self):
+        self.assertEqual(self.check(human_reviews=[(None, SHA, "COMMENTED")]), [])
+
+    def test_missing_gh_reports_blocked_without_traceback(self):
+        with (
+            patch.object(gate, "gh", side_effect=FileNotFoundError("gh")),
+            patch.object(sys, "argv", ["gate", "102", SHA]),
+        ):
+            self.assertEqual(gate.main(), 1)
 
     def test_draft_blocks(self):
         self.assertTrue(any("closed or draft" in r for r in self.check(draft=True)))
@@ -318,6 +363,51 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn("secret commented body", json.dumps(first))
         self.assertEqual(
             first["prs"][0]["bot_comments"][0]["body_hash"], monitor.digest("secret commented body")
+        )
+
+    def test_oversized_pr_is_flagged_without_failing_other_prs(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+                "comments": [],
+            }
+
+        def threads(has_next):
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": has_next},
+                            }
+                        }
+                    }
+                }
+            }
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                return [pr(102), pr(103)]
+            return threads("number=102" in args)
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = monitor.snapshot()["prs"]
+        self.assertEqual(
+            [(p["number"], p["threads_truncated"]) for p in prs], [(102, True), (103, False)]
         )
 
 

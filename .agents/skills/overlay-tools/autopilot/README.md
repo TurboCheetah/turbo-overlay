@@ -14,6 +14,8 @@ outside Git; this PR does not change them.
 2. A Hermes cron job runs immediately on accepted events and every ten minutes
    as a fallback. Its monitor emits a stable snapshot of open PRs created after
    a locally recorded PR-number baseline. Unchanged output skips the agent.
+   A PR with more than 100 review threads is flagged `threads_truncated`
+   rather than failing the whole sweep.
    It hashes bot comment bodies rather than injecting them into the prompt.
 3. The worker reviews the fresh PR and bot feedback. For authorized same-repo
    branches it may commit and push fixes. External forks get a read-only review
@@ -22,7 +24,7 @@ outside Git; this PR does not change them.
 4. Before any autonomous merge, call `turbo_overlay_pr_autopilot_gate.py` with
    the full reviewed head SHA. The gate rejects unauthorized heads, changed
    commits, non-green checks, missing current-head CodeRabbit/Cubic reviews,
-   unresolved threads, and GitHub merge conflicts. The `--merge` mode uses
+   standing change requests, unresolved threads, and GitHub merge conflicts. The `--merge` mode uses
    `gh pr merge --squash --match-head-commit` without an admin override and
    reads the PR back.
 
