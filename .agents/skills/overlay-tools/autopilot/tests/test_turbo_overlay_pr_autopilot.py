@@ -389,7 +389,10 @@ class MonitorTests(unittest.TestCase):
                         "pullRequest": {
                             "reviewThreads": {
                                 "nodes": [],
-                                "pageInfo": {"hasNextPage": has_next},
+                                "pageInfo": {
+                                    "hasNextPage": has_next,
+                                    "endCursor": "c1" if has_next else None,
+                                },
                             }
                         }
                     }
@@ -399,16 +402,112 @@ class MonitorTests(unittest.TestCase):
         def fake_gh(*args):
             if args[0] == "pr":
                 return [pr(102), pr(103)]
+            # PR 102's thread list never ends (hits the cap); PR 103 has one page.
             return threads("number=102" in args)
 
         with (
             patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "MAX_THREAD_PAGES", 2),
             patch.object(monitor, "gh", side_effect=fake_gh),
         ):
             prs = monitor.snapshot()["prs"]
         self.assertEqual(
             [(p["number"], p["threads_truncated"]) for p in prs], [(102, True), (103, False)]
         )
+
+    def test_thread_pagination_accumulates_all_pages(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        pr = {
+            "number": 102,
+            "headRefOid": SHA,
+            "baseRefName": "master",
+            "author": {"login": "TurboCheetah"},
+            "isDraft": False,
+            "statusCheckRollup": [],
+            "latestReviews": [],
+            "comments": [],
+        }
+        first_page = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [{"id": "PRRT_a", "isResolved": False}],
+                            "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                        }
+                    }
+                }
+            }
+        }
+        second_page = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [{"id": "PRRT_b", "isResolved": True}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        }
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                return [pr]
+            return second_page if "cursor=c1" in args else first_page
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            out = monitor.snapshot()["prs"][0]
+        # Digest must reflect both pages; unresolved count covers both too.
+        self.assertFalse(out["threads_truncated"])
+        self.assertEqual(out["unresolved_threads"], 1)
+        self.assertEqual(out["threads_digest"], monitor.digest("PRRT_a:0;PRRT_b:1"))
+
+    def test_thread_page_cap_flags_truncation(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        pr = {
+            "number": 102,
+            "headRefOid": SHA,
+            "baseRefName": "master",
+            "author": {"login": "TurboCheetah"},
+            "isDraft": False,
+            "statusCheckRollup": [],
+            "latestReviews": [],
+            "comments": [],
+        }
+        endless = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [{"id": "PRRT_a", "isResolved": True}],
+                            "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                        }
+                    }
+                }
+            }
+        }
+
+        def fake_gh(*args):
+            return [pr] if args[0] == "pr" else endless
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "MAX_THREAD_PAGES", 1),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            out = monitor.snapshot()["prs"][0]
+        self.assertTrue(out["threads_truncated"])
 
 
 if __name__ == "__main__":

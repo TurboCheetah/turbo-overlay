@@ -14,8 +14,9 @@ outside Git; this PR does not change them.
 2. A Hermes cron job runs immediately on accepted events and every ten minutes
    as a fallback. Its monitor emits a stable snapshot of open PRs created after
    a locally recorded PR-number baseline. Unchanged output skips the agent.
-   A PR with more than 100 review threads is flagged `threads_truncated`
-   rather than failing the whole sweep.
+   A PR whose review-thread list exceeds the pagination safety cap is flagged
+   `threads_truncated`, and the snapshot digests every fetched page so the
+   unchanged-output check still fires on late-page thread changes.
    It hashes bot comment bodies rather than injecting them into the prompt.
 3. The worker reviews the fresh PR and bot feedback. For authorized same-repo
    branches it may commit and push fixes. External forks get a read-only review
