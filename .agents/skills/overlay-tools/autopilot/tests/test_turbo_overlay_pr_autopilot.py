@@ -827,7 +827,7 @@ class MonitorTests(unittest.TestCase):
         with (
             patch.object(monitor, "CONFIG", Config()),
             patch.object(monitor, "gh", side_effect=fake_gh),
-            self.assertRaisesRegex(RuntimeError, "safety cap"),
+            self.assertRaisesRegex(ValueError, "safety cap"),
         ):
             monitor.snapshot()
 

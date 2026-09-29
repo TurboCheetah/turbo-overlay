@@ -127,8 +127,9 @@ def snapshot():
     )
     if len(prs) >= MAX_PR_PAGES * 100:
         # The API would silently truncate at the cap; fail loudly so the
-        # sweep cannot miss PRs beyond it (the gate refuses unknown state).
-        raise RuntimeError(f"PR list hit safety cap at {len(prs)} open PRs; manual review needed")
+        # sweep cannot miss PRs beyond it (ValueError is caught by the
+        # __main__ handler, which emits the designed failure message).
+        raise ValueError(f"PR list hit safety cap at {len(prs)} open PRs; manual review needed")
     output = []
     for pr in sorted(prs, key=lambda p: p["number"]):
         if pr["number"] <= cutoff:
