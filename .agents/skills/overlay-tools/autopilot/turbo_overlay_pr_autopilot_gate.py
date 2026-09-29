@@ -94,7 +94,10 @@ def inspect(number, expected_head):
             or review["state"] not in {"APPROVED", "COMMENTED"}
         ):
             reasons.append(f"{bot} has not completed a substantive current-head review")
-        elif "rate limit" in (review.get("body") or "").lower():
+        elif RABBIT_RATE_LIMIT.search(review.get("body") or ""):
+            # CodeRabbit embeds its rate-limit notice in an HTML marker comment.
+            # Match only that marker: a review body explaining or quoting the
+            # rate-limit check must not be mistaken for a rate-limited review.
             reasons.append(f"{bot} review was rate-limited")
 
     comments = flatten_pages(

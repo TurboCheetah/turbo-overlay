@@ -41,6 +41,7 @@ def fixture(
     mergeable=True,
     transient_none_polls=0,
     head_change_after_polls=None,
+    review_bodies=None,
 ):
     calls = {"pulls": 0}
 
@@ -81,7 +82,7 @@ def fixture(
             "user": {"login": name},
             "commit_id": review_head,
             "state": "COMMENTED",
-            "body": "Reviewed",
+            "body": (review_bodies or {}).get(name, "Reviewed"),
             "submitted_at": "2026-09-28T17:00:00Z",
         }
         for name in ("coderabbitai[bot]", "cubic-dev-ai[bot]")
@@ -167,6 +168,17 @@ class MergeGateTests(unittest.TestCase):
             "<!-- end of auto-generated comment: skip review by coderabbit.ai -->"
         )
         self.assertEqual(self.check(rabbit_comment=body), [])
+
+    def test_review_body_mentioning_rate_limit_does_not_block(self):
+        # A review body that explains the rate-limit check must not be mistaken
+        # for a rate-limited review: only the CodeRabbit marker comment counts.
+        bodies = {"coderabbitai[bot]": "Reviewed. This PR changes the rate limit check."}
+        self.assertEqual(self.check(review_bodies=bodies), [])
+
+    def test_review_body_marker_blocks(self):
+        body = "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->"
+        reasons = self.check(review_bodies={"coderabbitai[bot]": body})
+        self.assertTrue(any("rate-limit" in r for r in reasons))
 
     def test_stale_human_changes_request_blocks(self):
         reviews = [({"login": "TurboCheetah"}, "b" * 40, "CHANGES_REQUESTED")]
