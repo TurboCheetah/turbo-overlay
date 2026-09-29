@@ -29,12 +29,9 @@ def flatten_pages(items):
 
 def inspect(number, expected_head):
     pr = gh("api", f"repos/{REPO}/pulls/{number}")
-    head = pr["head"]["sha"]
     reasons = []
     if pr["state"] != "open" or pr.get("draft"):
         reasons.append("PR is closed or draft")
-    if head != expected_head:
-        reasons.append("head changed since review; review new commit")
     if pr["base"]["ref"] != "master" or pr["base"]["repo"]["full_name"] != REPO:
         reasons.append("unexpected target repository or branch")
     if pr["user"]["login"] not in ALLOWED or (pr["head"]["repo"] or {}).get("full_name") != REPO:
@@ -46,6 +43,12 @@ def inspect(number, expected_head):
         time.sleep(2)
         pr = gh("api", f"repos/{REPO}/pulls/{number}")
         attempts += 1
+    # A push can land while re-polling, so the head that review checks and
+    # --match-head-commit validate must come from the freshest response, not
+    # the first one read before the poll.
+    head = pr["head"]["sha"]
+    if head != expected_head:
+        reasons.append("head changed since review; review new commit")
     if pr.get("mergeable") is not True or pr.get("mergeable_state") != "clean":
         reasons.append(f"GitHub merge state not clean: {pr.get('mergeable_state')}")
 

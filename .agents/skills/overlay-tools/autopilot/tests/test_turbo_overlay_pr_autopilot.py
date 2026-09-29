@@ -40,6 +40,7 @@ def fixture(
     review_decision="",
     mergeable=True,
     transient_none_polls=0,
+    head_change_after_polls=None,
 ):
     calls = {"pulls": 0}
 
@@ -48,6 +49,8 @@ def fixture(
         calls["pulls"] += 1
         merged = {**pr}
         merged["mergeable"] = None if calls["pulls"] <= transient_none_polls else mergeable
+        if head_change_after_polls is not None and calls["pulls"] > head_change_after_polls:
+            merged["head"] = {"sha": "b" * 40, "repo": {"full_name": head_repo}}
         return merged
 
     pr = {
@@ -222,6 +225,19 @@ class MergeGateTests(unittest.TestCase):
         ):
             reasons = gate.inspect(102, SHA)[0]
         self.assertTrue(any("merge state" in r for r in reasons))
+
+    def test_head_change_during_mergeable_poll_blocks(self):
+        # The re-poll exists because mergeable can be null right after a push;
+        # that same push can change the head. A head observed on any poll must
+        # be compared against the expected head, not just the first response.
+        with (
+            patch.object(
+                gate, "gh", side_effect=fixture(transient_none_polls=1, head_change_after_polls=1)
+            ),
+            patch.object(gate.time, "sleep", return_value=None),
+        ):
+            reasons = gate.inspect(102, SHA)[0]
+        self.assertTrue(any("head changed" in r for r in reasons))
 
     def test_missing_repo_workflow_blocks(self):
         self.assertTrue(
@@ -664,8 +680,9 @@ class MonitorTests(unittest.TestCase):
                 return [[]]
             if args[0] == "pr":
                 return [pr]
+            body = "first wording" if not calls["comment_edited"] else "edited wording"
             calls["comment_edited"] = not calls["comment_edited"]
-            return threads("first wording" if not calls["comment_edited"] else "edited wording")
+            return threads(body)
 
         with (
             patch.object(monitor, "CONFIG", Config()),
@@ -744,8 +761,12 @@ class MonitorTests(unittest.TestCase):
                 calls["pages"] += 1
                 if calls["pages"] == 1:
                     # A full first page forces a second page request.
+                    # GitHub lists open PRs newest-first, so the first page
+                    # holds the highest numbers.
                     return [pr(102 - i) for i in range(100)]
-                return [pr(103)]
+                # The next page continues with older, lower-numbered PRs
+                # that fall under the cutoff and are skipped.
+                return [pr(2)]
             if args[1].endswith("/comments"):
                 return [[]]
             return {
@@ -766,9 +787,9 @@ class MonitorTests(unittest.TestCase):
             patch.object(monitor, "gh", side_effect=fake_gh),
         ):
             prs = monitor.snapshot()["prs"]
-        # A full first page triggers another page request; both listed PRs are
-        # above the cutoff, and the lower-numbered cutoff skips the rest.
-        self.assertEqual([p["number"] for p in prs], [102, 103])
+        # A full first page triggers another page request; the lower-numbered
+        # cutoff (101) skips everything except PR 102.
+        self.assertEqual([p["number"] for p in prs], [102])
         self.assertGreater(calls["pages"], 1)
 
 
