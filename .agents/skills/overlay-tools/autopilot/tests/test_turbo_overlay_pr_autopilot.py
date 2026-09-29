@@ -37,6 +37,7 @@ def fixture(
     state="open",
     mergeable_state="clean",
     no_repo_workflow=False,
+    review_decision="",
     mergeable=True,
     transient_none_polls=0,
 ):
@@ -69,7 +70,7 @@ def fixture(
         {"__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS"},
     ]
     details = {
-        "reviewDecision": "",
+        "reviewDecision": review_decision,
         "statusCheckRollup": [] if no_repo_workflow else checks,
     }
     reviews = [
@@ -227,6 +228,11 @@ class MergeGateTests(unittest.TestCase):
             any("no completed repository CI" in r for r in self.check(no_repo_workflow=True))
         )
 
+    def test_review_decision_gate_blocks(self):
+        for decision in ("CHANGES_REQUESTED", "REVIEW_REQUIRED"):
+            reasons = self.check(review_decision=decision)
+            self.assertTrue(any("GitHub review gate" in r for r in reasons), decision)
+
     def test_merge_uses_reviewed_sha_and_verifies_readback(self):
         merged = {
             "merged": True,
@@ -277,14 +283,21 @@ class MergeGateTests(unittest.TestCase):
 class WebhookFilterTests(unittest.TestCase):
     def test_only_expected_pr_events_reach_job(self):
         path = ROOT / "turbo_overlay_pr_autopilot_filter.py"
-        for action, repo, number, accepted in (
-            ("opened", gate.REPO, 102, True),
-            ("reopened", gate.REPO, 102, True),
-            ("synchronize", gate.REPO, 102, True),
-            ("edited", gate.REPO, 102, False),
-            ("opened", "other/repo", 102, False),
-            ("opened", gate.REPO, "102", False),
-            ("opened", gate.REPO, True, False),
+        for action, repo, number, expected in (
+            ("opened", gate.REPO, 102, {"repo": gate.REPO, "number": 102, "action": "opened"}),
+            ("reopened", gate.REPO, 102, {"repo": gate.REPO, "number": 102, "action": "reopened"}),
+            (
+                "synchronize",
+                gate.REPO,
+                102,
+                {"repo": gate.REPO, "number": 102, "action": "synchronize"},
+            ),
+            ("edited", gate.REPO, 102, None),
+            ("opened", "other/repo", 102, None),
+            ("opened", gate.REPO, "102", None),
+            ("opened", gate.REPO, True, None),
+            ("opened", gate.REPO, 0, None),
+            ("opened", gate.REPO, -1, None),
         ):
             event = {
                 "action": action,
@@ -299,7 +312,10 @@ class WebhookFilterTests(unittest.TestCase):
                 check=True,
             )
             output = json.loads(result.stdout)
-            self.assertEqual(not output.get("__hermes_ignore__", False), accepted)
+            if expected is None:
+                self.assertTrue(output.get("__hermes_ignore__", False), (action, repo, number))
+            else:
+                self.assertEqual(output, expected, (action, repo, number))
 
     def test_malformed_payload_fails_closed(self):
         path = ROOT / "turbo_overlay_pr_autopilot_filter.py"
@@ -503,7 +519,17 @@ class MonitorTests(unittest.TestCase):
         # Digest must reflect both pages; unresolved count covers both too.
         self.assertFalse(out["threads_truncated"])
         self.assertEqual(out["unresolved_threads"], 1)
-        self.assertEqual(out["threads_digest"], monitor.digest("PRRT_a:0;PRRT_b:1"))
+        expected = monitor.digest(
+            ";".join(
+                sorted(
+                    [
+                        monitor.thread_state_key({"id": "PRRT_a", "isResolved": False}),
+                        monitor.thread_state_key({"id": "PRRT_b", "isResolved": True}),
+                    ]
+                )
+            )
+        )
+        self.assertEqual(out["threads_digest"], expected)
 
     def test_thread_page_cap_flags_truncation(self):
         class Config:
@@ -592,6 +618,158 @@ class MonitorTests(unittest.TestCase):
             {"bot": "cubic-dev-ai[bot]", "body_hash": monitor.digest("comment 101")}, comments
         )
         self.assertEqual(comments, run([[late_bot], [early_bot]]))
+
+    def test_thread_comment_edit_changes_threads_digest(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        pr = {
+            "number": 102,
+            "headRefOid": SHA,
+            "baseRefName": "master",
+            "author": {"login": "TurboCheetah"},
+            "isDraft": False,
+            "statusCheckRollup": [],
+            "latestReviews": [],
+        }
+
+        def threads(comment_body):
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "id": "PRRT_t",
+                                        "isResolved": False,
+                                        "comments": {
+                                            "nodes": [{"databaseId": 1, "body": comment_body}],
+                                            "pageInfo": {"hasNextPage": False},
+                                        },
+                                    }
+                                ],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        calls = {"comment_edited": False}
+
+        def fake_gh(*args):
+            if args[1].endswith("/comments"):
+                return [[]]
+            if args[0] == "pr":
+                return [pr]
+            calls["comment_edited"] = not calls["comment_edited"]
+            return threads("first wording" if not calls["comment_edited"] else "edited wording")
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            first = monitor.snapshot()["prs"][0]["threads_digest"]
+            second = monitor.snapshot()["prs"][0]["threads_digest"]
+        self.assertNotEqual(first, second)
+
+    def test_per_pr_fetch_failure_does_not_blank_snapshot(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                return [pr(102), pr(103)]
+            if args[1].endswith("/comments"):
+                return [[]]
+            if "number=103" in args:
+                raise subprocess.SubprocessError("throttled")
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = monitor.snapshot()["prs"]
+        by_number = {p["number"]: p for p in prs}
+        self.assertIn(102, by_number)
+        self.assertIn("error", by_number[103])
+        self.assertTrue(by_number[103]["error"].startswith("per-PR fetch failed:"))
+
+    def test_pr_list_paginates_beyond_one_page(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        calls = {"pages": 0}
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                calls["pages"] += 1
+                if calls["pages"] == 1:
+                    # A full first page forces a second page request.
+                    return [pr(102 - i) for i in range(100)]
+                return [pr(103)]
+            if args[1].endswith("/comments"):
+                return [[]]
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = monitor.snapshot()["prs"]
+        # A full first page triggers another page request; both listed PRs are
+        # above the cutoff, and the lower-numbered cutoff skips the rest.
+        self.assertEqual([p["number"] for p in prs], [102, 103])
+        self.assertGreater(calls["pages"], 1)
 
 
 if __name__ == "__main__":

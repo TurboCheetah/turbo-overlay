@@ -18,6 +18,13 @@ CONFIG = Path(
 BOT_LOGINS = {"coderabbitai", "coderabbitai[bot]", "cubic-dev-ai", "cubic-dev-ai[bot]"}
 # GitHub pages review threads at 100; this bounds a pathological PR (20k threads).
 MAX_THREAD_PAGES = 200
+# `gh pr list` returns one page of 100; cap pages so a broken API cannot hang
+# the sweep forever (50 pages = 5000 open PRs, far beyond this repository).
+MAX_PR_PAGES = 50
+PR_LIST_FIELDS = (
+    "number,headRefOid,baseRefName,mergeable,reviewDecision,"
+    "headRepositoryOwner,author,isDraft,statusCheckRollup,latestReviews"
+)
 
 
 def gh(*args):
@@ -37,7 +44,10 @@ def fetch_threads(number):
     unchanged-output check skipped reconciliation for oversized PRs. GitHub
     pages at 100; stop early when a page has no more, and flag truncation
     only if the cap is hit (the merge gate still refuses unenumerated
-    threads independently).
+    threads independently). Cubic flagged that the digest also missed
+    replies or edits inside an existing thread, so each thread includes a
+    digest of its comments (bounded at 100; the hasNextPage marker is part
+    of the digest so an oversized thread still changes it).
     """
     nodes = []
     cursor = None
@@ -54,7 +64,9 @@ def fetch_threads(number):
             "-f",
             "query=query($owner:String!, $name:String!, $number:Int!, $cursor:String) { "
             "repository(owner:$owner, name:$name) { pullRequest(number:$number) { "
-            "reviewThreads(first:100, after:$cursor) { nodes { id isResolved } "
+            "reviewThreads(first:100, after:$cursor) { nodes { id isResolved "
+            "comments(first:100) { nodes { databaseId body } "
+            "pageInfo { hasNextPage } } } "
             "pageInfo { hasNextPage endCursor } } } } }",
             *([] if cursor is None else ["-F", f"cursor={cursor}"]),
         )
@@ -64,6 +76,24 @@ def fetch_threads(number):
             return nodes, False
         cursor = data["pageInfo"]["endCursor"]
     return nodes, True
+
+
+def thread_state_key(node):
+    """Stable per-thread fingerprint: id, resolved flag, and comment bodies.
+
+    Including comment content means a bot reply or an edited comment inside
+    an existing thread changes the snapshot digest, waking the review sweep.
+    """
+    comments = sorted(
+        (node.get("comments") or {}).get("nodes", []),
+        key=lambda c: c.get("databaseId") or 0,
+    )
+    comment_digest = digest(
+        "\x1f".join(f"{c.get('databaseId')}:{digest(c.get('body'))}" for c in comments)
+        + "\x1e"
+        + str(bool((node.get("comments") or {}).get("pageInfo", {}).get("hasNextPage")))
+    )
+    return f"{node['id']}:{int(node['isResolved'])}:{comment_digest}"
 
 
 def fetch_bot_comments(number):
@@ -82,70 +112,89 @@ def fetch_bot_comments(number):
 
 def snapshot():
     cutoff = int(json.loads(CONFIG.read_text())["created_after_pr"])
-    prs = gh(
-        "pr",
-        "list",
-        "-R",
-        REPO,
-        "--state",
-        "open",
-        "--limit",
-        "500",
-        "--json",
-        "number,headRefOid,baseRefName,mergeable,reviewDecision,"
-        "headRepositoryOwner,author,isDraft,statusCheckRollup,"
-        "latestReviews",
-    )
+    prs = []
+    for page in range(1, MAX_PR_PAGES + 1):
+        batch = gh(
+            "pr",
+            "list",
+            "-R",
+            REPO,
+            "--state",
+            "open",
+            "--page",
+            str(page),
+            "--limit",
+            "100",
+            "--json",
+            PR_LIST_FIELDS,
+        )
+        prs.extend(batch)
+        if len(batch) < 100:
+            break
     output = []
     for pr in sorted(prs, key=lambda p: p["number"]):
         if pr["number"] <= cutoff:
             continue
-        reviews = sorted(
-            (
+        try:
+            output.append(snapshot_pr(pr))
+        except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+            # One PR's transient fetch failure must not blank the whole sweep:
+            # keep the other PRs and mark the failed one so the change is
+            # visible to the next monitor run.
+            output.append(
                 {
-                    "bot": r["author"]["login"],
-                    "state": r["state"],
-                    "at": r["submittedAt"],
-                    "body_hash": digest(r["body"]),
+                    "number": pr["number"],
+                    "head": pr.get("headRefOid"),
+                    "error": f"per-PR fetch failed: {exc}",
                 }
-                for r in pr["latestReviews"]
-                if r.get("author") and r["author"]["login"] in BOT_LOGINS
-            ),
-            key=lambda r: (r["bot"], r["at"] or ""),
-        )
-        comments = fetch_bot_comments(pr["number"])
-        checks = sorted(
-            [
-                {
-                    "name": c.get("name") or c.get("context"),
-                    "status": c.get("status") or c.get("state"),
-                    "conclusion": c.get("conclusion"),
-                }
-                for c in pr["statusCheckRollup"]
-            ],
-            key=lambda c: str(c["name"]),
-        )
-        thread_nodes, threads_truncated = fetch_threads(pr["number"])
-        thread_state = sorted(f"{t['id']}:{int(t['isResolved'])}" for t in thread_nodes)
-        output.append(
-            {
-                "number": pr["number"],
-                "head": pr["headRefOid"],
-                "base": pr["baseRefName"],
-                "mergeable": pr.get("mergeable"),
-                "review_decision": pr.get("reviewDecision"),
-                "author": (pr.get("author") or {}).get("login"),
-                "head_owner": (pr.get("headRepositoryOwner") or {}).get("login"),
-                "draft": pr["isDraft"],
-                "checks": checks,
-                "bot_reviews": reviews,
-                "bot_comments": comments,
-                "unresolved_threads": sum(not t["isResolved"] for t in thread_nodes),
-                "threads_digest": digest(";".join(thread_state)),
-                "threads_truncated": threads_truncated,
-            }
-        )
+            )
     return {"repository": REPO, "prs": output}
+
+
+def snapshot_pr(pr):
+    reviews = sorted(
+        (
+            {
+                "bot": r["author"]["login"],
+                "state": r["state"],
+                "at": r["submittedAt"],
+                "body_hash": digest(r["body"]),
+            }
+            for r in pr["latestReviews"]
+            if r.get("author") and r["author"]["login"] in BOT_LOGINS
+        ),
+        key=lambda r: (r["bot"], r["at"] or ""),
+    )
+    comments = fetch_bot_comments(pr["number"])
+    checks = sorted(
+        [
+            {
+                "name": c.get("name") or c.get("context"),
+                "status": c.get("status") or c.get("state"),
+                "conclusion": c.get("conclusion"),
+            }
+            for c in pr["statusCheckRollup"]
+        ],
+        key=lambda c: str(c["name"]),
+    )
+    thread_nodes, threads_truncated = fetch_threads(pr["number"])
+    thread_state = sorted(thread_state_key(t) for t in thread_nodes)
+    return {
+        "number": pr["number"],
+        "head": pr["headRefOid"],
+        "base": pr["baseRefName"],
+        "mergeable": pr.get("mergeable"),
+        "review_decision": pr.get("reviewDecision"),
+        "author": (pr.get("author") or {}).get("login"),
+        "head_owner": (pr.get("headRepositoryOwner") or {}).get("login"),
+        "draft": pr["isDraft"],
+        "checks": checks,
+        "bot_reviews": reviews,
+        "bot_comments": comments,
+        "unresolved_threads": sum(not t["isResolved"] for t in thread_nodes),
+        "threads_digest": digest(";".join(thread_state)),
+        "threads_truncated": threads_truncated,
+    }
 
 
 if __name__ == "__main__":
