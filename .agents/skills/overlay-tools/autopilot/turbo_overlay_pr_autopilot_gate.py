@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import subprocess
+import time
 
 REPO = "TurboCheetah/turbo-overlay"
 ALLOWED = {"TurboCheetah", "overlay-bot[bot]"}
@@ -38,6 +39,13 @@ def inspect(number, expected_head):
         reasons.append("unexpected target repository or branch")
     if pr["user"]["login"] not in ALLOWED or (pr["head"]["repo"] or {}).get("full_name") != REPO:
         reasons.append("not an authorized same-repository author/head; manual approval required")
+    # GitHub computes `mergeable` asynchronously and returns null until it
+    # finishes; re-poll briefly so a first-read null does not false-block.
+    attempts = 0
+    while pr.get("mergeable") is None and attempts < 5:
+        time.sleep(2)
+        pr = gh("api", f"repos/{REPO}/pulls/{number}")
+        attempts += 1
     if pr.get("mergeable") is not True or pr.get("mergeable_state") != "clean":
         reasons.append(f"GitHub merge state not clean: {pr.get('mergeable_state')}")
 

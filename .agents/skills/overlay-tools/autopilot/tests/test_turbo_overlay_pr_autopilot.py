@@ -37,14 +37,25 @@ def fixture(
     state="open",
     mergeable_state="clean",
     no_repo_workflow=False,
+    mergeable=True,
+    transient_none_polls=0,
 ):
+    calls = {"pulls": 0}
+
+    def pr_at_call():
+        """Return the PR dict, with `mergeable` None for the first polls."""
+        calls["pulls"] += 1
+        merged = {**pr}
+        merged["mergeable"] = None if calls["pulls"] <= transient_none_polls else mergeable
+        return merged
+
     pr = {
         "state": state,
         "draft": draft,
         "head": {"sha": SHA, "repo": {"full_name": head_repo}},
         "base": {"ref": "master", "repo": {"full_name": gate.REPO}},
         "user": {"login": author},
-        "mergeable": True,
+        "mergeable": mergeable,
         "mergeable_state": mergeable_state,
     }
     checks = [
@@ -109,7 +120,7 @@ def fixture(
         if args[0] == "api" and "comments" in args[1]:
             return comments
         if args[0] == "api" and "pulls/" in args[1]:
-            return pr
+            return pr_at_call()
         raise AssertionError(args)
 
     return fake_gh
@@ -191,6 +202,25 @@ class MergeGateTests(unittest.TestCase):
 
     def test_non_clean_merge_state_blocks(self):
         self.assertTrue(any("merge state" in r for r in self.check(mergeable_state="dirty")))
+
+    def test_transient_mergeable_none_repolls_and_passes(self):
+        # GitHub computes mergeable asynchronously; a null on the first read
+        # must re-poll instead of failing closed.
+        with (
+            patch.object(gate, "gh", side_effect=fixture(transient_none_polls=1)),
+            patch.object(gate.time, "sleep", return_value=None),
+        ):
+            reasons = gate.inspect(102, SHA)[0]
+        self.assertEqual(reasons, [])
+
+    def test_persistent_mergeable_none_blocks(self):
+        # Still fail closed when the mergeable field never resolves.
+        with (
+            patch.object(gate, "gh", side_effect=fixture(transient_none_polls=99)),
+            patch.object(gate.time, "sleep", return_value=None),
+        ):
+            reasons = gate.inspect(102, SHA)[0]
+        self.assertTrue(any("merge state" in r for r in reasons))
 
     def test_missing_repo_workflow_blocks(self):
         self.assertTrue(
