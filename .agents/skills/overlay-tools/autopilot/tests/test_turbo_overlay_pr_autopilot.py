@@ -153,7 +153,10 @@ class MergeGateTests(unittest.TestCase):
         # The merge path passes inspect's head to --match-head-commit and
         # judges bot-review freshness against it; a regression returning a
         # stale first-read head must not pass.
-        with patch.object(gate, "gh", side_effect=fixture(transient_none_polls=1)):
+        with (
+            patch.object(gate, "gh", side_effect=fixture(transient_none_polls=1)),
+            patch.object(gate.time, "sleep", return_value=None),
+        ):
             reasons, head = gate.inspect(102, SHA)
         self.assertEqual(reasons, [])
         self.assertEqual(head, SHA)
