@@ -750,7 +750,7 @@ class MonitorTests(unittest.TestCase):
         self.assertIn("error", by_number[103])
         self.assertTrue(by_number[103]["error"].startswith("per-PR fetch failed:"))
 
-    def test_pr_list_paginates_beyond_one_page(self):
+    def test_pr_list_beyond_one_page_single_request(self):
         class Config:
             def read_text(self):
                 return '{"created_after_pr":101}'
@@ -766,19 +766,16 @@ class MonitorTests(unittest.TestCase):
                 "latestReviews": [],
             }
 
-        calls = {"pages": 0}
+        calls = {"list": 0}
 
         def fake_gh(*args):
             if args[0] == "pr":
-                calls["pages"] += 1
-                if calls["pages"] == 1:
-                    # A full first page forces a second page request.
-                    # GitHub lists open PRs newest-first, so the first page
-                    # holds the highest numbers.
-                    return [pr(102 - i) for i in range(100)]
-                # The next page continues with older, lower-numbered PRs
-                # that fall under the cutoff and are skipped.
-                return [pr(2)]
+                calls["list"] += 1
+                # A single `--limit` request returns more than one API page
+                # (gh paginates internally). GitHub lists open PRs
+                # newest-first, so the response holds the highest numbers
+                # followed by older, lower-numbered PRs below the cutoff.
+                return [pr(102 - i) for i in range(150)]
             if args[1].endswith("/comments"):
                 return [[]]
             return {
@@ -799,10 +796,40 @@ class MonitorTests(unittest.TestCase):
             patch.object(monitor, "gh", side_effect=fake_gh),
         ):
             prs = monitor.snapshot()["prs"]
-        # A full first page triggers another page request; the lower-numbered
-        # cutoff (101) skips everything except PR 102.
+        # One call with the internal-pagination limit; the cutoff (101)
+        # keeps only PR 102 from a response spanning many API pages.
+        self.assertEqual(calls["list"], 1)
         self.assertEqual([p["number"] for p in prs], [102])
-        self.assertGreater(calls["pages"], 1)
+
+    def test_pr_list_safety_cap_raises(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                # A repo with more open PRs than the cap would be truncated
+                # silently by the API; the monitor must fail loudly instead.
+                return [pr(10000 - i) for i in range(monitor.MAX_PR_PAGES * 100)]
+            raise AssertionError(args)
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+            self.assertRaisesRegex(RuntimeError, "safety cap"),
+        ):
+            monitor.snapshot()
 
 
 if __name__ == "__main__":

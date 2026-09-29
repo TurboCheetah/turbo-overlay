@@ -18,8 +18,9 @@ CONFIG = Path(
 BOT_LOGINS = {"coderabbitai", "coderabbitai[bot]", "cubic-dev-ai", "cubic-dev-ai[bot]"}
 # GitHub pages review threads at 100; this bounds a pathological PR (20k threads).
 MAX_THREAD_PAGES = 200
-# `gh pr list` returns one page of 100; cap pages so a broken API cannot hang
-# the sweep forever (50 pages = 5000 open PRs, far beyond this repository).
+# `gh pr list --limit N` paginates internally; cap the single request so a
+# broken API cannot hang the sweep forever (50 pages = 5000 open PRs, far
+# beyond this repository) and fail loudly if the cap is reached.
 MAX_PR_PAGES = 50
 PR_LIST_FIELDS = (
     "number,headRefOid,baseRefName,mergeable,reviewDecision,"
@@ -112,25 +113,22 @@ def fetch_bot_comments(number):
 
 def snapshot():
     cutoff = int(json.loads(CONFIG.read_text())["created_after_pr"])
-    prs = []
-    for page in range(1, MAX_PR_PAGES + 1):
-        batch = gh(
-            "pr",
-            "list",
-            "-R",
-            REPO,
-            "--state",
-            "open",
-            "--page",
-            str(page),
-            "--limit",
-            "100",
-            "--json",
-            PR_LIST_FIELDS,
-        )
-        prs.extend(batch)
-        if len(batch) < 100:
-            break
+    prs = gh(
+        "pr",
+        "list",
+        "-R",
+        REPO,
+        "--state",
+        "open",
+        "--limit",
+        str(MAX_PR_PAGES * 100),
+        "--json",
+        PR_LIST_FIELDS,
+    )
+    if len(prs) >= MAX_PR_PAGES * 100:
+        # The API would silently truncate at the cap; fail loudly so the
+        # sweep cannot miss PRs beyond it (the gate refuses unknown state).
+        raise RuntimeError(f"PR list hit safety cap at {len(prs)} open PRs; manual review needed")
     output = []
     for pr in sorted(prs, key=lambda p: p["number"]):
         if pr["number"] <= cutoff:
