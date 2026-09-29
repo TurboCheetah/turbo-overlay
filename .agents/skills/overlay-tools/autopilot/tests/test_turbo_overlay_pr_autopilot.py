@@ -180,6 +180,23 @@ class MergeGateTests(unittest.TestCase):
         reasons = self.check(review_bodies={"coderabbitai[bot]": body})
         self.assertTrue(any("rate-limit" in r for r in reasons))
 
+    def test_empty_comment_review_blocks(self):
+        # A COMMENTED review with no visible content is not a substantive
+        # current-head review even when it is anchored at the head SHA.
+        reasons = self.check(review_bodies={"coderabbitai[bot]": "", "cubic-dev-ai[bot]": ""})
+        self.assertTrue(any("current-head review" in r for r in reasons))
+
+    def test_marker_only_comment_review_blocks(self):
+        # HTML marker comments alone do not make a review substantive.
+        body = "<!-- cubic:review-post:abc -->"
+        reasons = self.check(review_bodies={"coderabbitai[bot]": body})
+        self.assertTrue(any("current-head review" in r for r in reasons))
+
+    def test_marker_plus_text_review_passes(self):
+        # Marker comments with real findings text remain substantive.
+        body = "<!-- cubic:review-post:abc -->\n**1 issue found**"
+        self.assertEqual(self.check(review_bodies={"coderabbitai[bot]": body}), [])
+
     def test_stale_human_changes_request_blocks(self):
         reviews = [({"login": "TurboCheetah"}, "b" * 40, "CHANGES_REQUESTED")]
         reasons = self.check(human_reviews=reviews)

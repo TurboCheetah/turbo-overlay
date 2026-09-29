@@ -15,6 +15,11 @@ BOTS = {"coderabbitai", "cubic-dev-ai"}
 RABBIT_RATE_LIMIT = re.compile(r"<!--[^>]*rate limit[^>]*coderabbit\.ai[^>]*-->", re.IGNORECASE)
 
 
+def _visible_body(body):
+    """Strip HTML marker comments so a marker-only review is not substantive."""
+    return re.sub(r"<!--.*?-->", "", body or "", flags=re.DOTALL).strip()
+
+
 def gh(*args):
     result = subprocess.run(["gh", *args], capture_output=True, text=True, check=True, timeout=90)
     return json.loads(result.stdout)
@@ -99,6 +104,10 @@ def inspect(number, expected_head):
             # Match only that marker: a review body explaining or quoting the
             # rate-limit check must not be mistaken for a rate-limited review.
             reasons.append(f"{bot} review was rate-limited")
+        elif review["state"] == "COMMENTED" and not _visible_body(review.get("body")):
+            # A COMMENTED review with no visible content is not a substantive
+            # review of this head; require actual findings or text.
+            reasons.append(f"{bot} has not completed a substantive current-head review")
 
     comments = flatten_pages(
         gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
