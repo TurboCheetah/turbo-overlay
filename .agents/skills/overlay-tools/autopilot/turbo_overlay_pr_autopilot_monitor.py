@@ -66,6 +66,20 @@ def fetch_threads(number):
     return nodes, True
 
 
+def fetch_bot_comments(number):
+    """Hash every bot issue comment; `gh pr list --json comments` stops at one page."""
+    pages = gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
+    return sorted(
+        (
+            {"bot": c["user"]["login"], "body_hash": digest(c.get("body"))}
+            for page in pages
+            for c in page
+            if (c.get("user") or {}).get("login") in BOT_LOGINS
+        ),
+        key=lambda c: (c["bot"], c["body_hash"]),
+    )
+
+
 def snapshot():
     cutoff = int(json.loads(CONFIG.read_text())["created_after_pr"])
     prs = gh(
@@ -80,27 +94,26 @@ def snapshot():
         "--json",
         "number,headRefOid,baseRefName,mergeable,reviewDecision,"
         "headRepositoryOwner,author,isDraft,statusCheckRollup,"
-        "latestReviews,comments",
+        "latestReviews",
     )
     output = []
     for pr in sorted(prs, key=lambda p: p["number"]):
         if pr["number"] <= cutoff:
             continue
-        reviews = [
-            {
-                "bot": r["author"]["login"],
-                "state": r["state"],
-                "at": r["submittedAt"],
-                "body_hash": digest(r["body"]),
-            }
-            for r in pr["latestReviews"]
-            if r.get("author") and r["author"]["login"] in BOT_LOGINS
-        ]
-        comments = [
-            {"bot": c["author"]["login"], "body_hash": digest(c["body"])}
-            for c in pr["comments"]
-            if c.get("author") and c["author"]["login"] in BOT_LOGINS
-        ]
+        reviews = sorted(
+            (
+                {
+                    "bot": r["author"]["login"],
+                    "state": r["state"],
+                    "at": r["submittedAt"],
+                    "body_hash": digest(r["body"]),
+                }
+                for r in pr["latestReviews"]
+                if r.get("author") and r["author"]["login"] in BOT_LOGINS
+            ),
+            key=lambda r: (r["bot"], r["at"] or ""),
+        )
+        comments = fetch_bot_comments(pr["number"])
         checks = sorted(
             [
                 {

@@ -327,12 +327,6 @@ class MonitorTests(unittest.TestCase):
                     "body": "private feedback",
                 }
             ],
-            "comments": [
-                {
-                    "author": {"login": "coderabbitai[bot]"},
-                    "body": "secret commented body",
-                }
-            ],
         }
         graphql = {
             "data": {
@@ -347,8 +341,17 @@ class MonitorTests(unittest.TestCase):
             }
         }
 
+        rest_comments = [
+            [
+                {"user": {"login": "coderabbitai[bot]"}, "body": "secret commented body"},
+                {"user": {"login": "someone"}, "body": "human comment"},
+            ]
+        ]
+
         def fake_gh(*args):
-            return [pr] if args[0] == "pr" else graphql
+            if args[0] == "pr":
+                return [pr]
+            return rest_comments if args[1].endswith("/comments") else graphql
 
         with (
             patch.object(monitor, "CONFIG", Config()),
@@ -379,7 +382,6 @@ class MonitorTests(unittest.TestCase):
                 "isDraft": False,
                 "statusCheckRollup": [],
                 "latestReviews": [],
-                "comments": [],
             }
 
         def threads(has_next):
@@ -400,6 +402,8 @@ class MonitorTests(unittest.TestCase):
             }
 
         def fake_gh(*args):
+            if args[1].endswith("/comments"):
+                return [[]]
             if args[0] == "pr":
                 return [pr(102), pr(103)]
             # PR 102's thread list never ends (hits the cap); PR 103 has one page.
@@ -428,7 +432,6 @@ class MonitorTests(unittest.TestCase):
             "isDraft": False,
             "statusCheckRollup": [],
             "latestReviews": [],
-            "comments": [],
         }
         first_page = {
             "data": {
@@ -456,6 +459,8 @@ class MonitorTests(unittest.TestCase):
         }
 
         def fake_gh(*args):
+            if args[1].endswith("/comments"):
+                return [[]]
             if args[0] == "pr":
                 return [pr]
             return second_page if "cursor=c1" in args else first_page
@@ -483,7 +488,6 @@ class MonitorTests(unittest.TestCase):
             "isDraft": False,
             "statusCheckRollup": [],
             "latestReviews": [],
-            "comments": [],
         }
         endless = {
             "data": {
@@ -499,6 +503,8 @@ class MonitorTests(unittest.TestCase):
         }
 
         def fake_gh(*args):
+            if args[1].endswith("/comments"):
+                return [[]]
             return [pr] if args[0] == "pr" else endless
 
         with (
@@ -508,6 +514,54 @@ class MonitorTests(unittest.TestCase):
         ):
             out = monitor.snapshot()["prs"][0]
         self.assertTrue(out["threads_truncated"])
+
+    def test_bot_comments_span_every_page_and_ignore_order(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        pr = {
+            "number": 102,
+            "headRefOid": SHA,
+            "baseRefName": "master",
+            "author": {"login": "TurboCheetah"},
+            "isDraft": False,
+            "statusCheckRollup": [],
+            "latestReviews": [],
+        }
+        threads = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+        }
+        human = [{"user": {"login": "someone"}, "body": "hi"}] * 100
+        late_bot = {"user": {"login": "cubic-dev-ai[bot]"}, "body": "comment 101"}
+        early_bot = {"user": {"login": "coderabbitai[bot]"}, "body": "summary"}
+
+        def run(pages):
+            def fake_gh(*args):
+                if args[0] == "pr":
+                    return [pr]
+                return pages if args[1].endswith("/comments") else threads
+
+            with (
+                patch.object(monitor, "CONFIG", Config()),
+                patch.object(monitor, "gh", side_effect=fake_gh),
+            ):
+                return monitor.snapshot()["prs"][0]["bot_comments"]
+
+        comments = run([[early_bot, *human[:99]], [human[0], late_bot]])
+        self.assertIn(
+            {"bot": "cubic-dev-ai[bot]", "body_hash": monitor.digest("comment 101")}, comments
+        )
+        self.assertEqual(comments, run([[late_bot], [early_bot]]))
 
 
 if __name__ == "__main__":
