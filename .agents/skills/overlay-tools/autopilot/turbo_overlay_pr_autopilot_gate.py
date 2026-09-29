@@ -35,8 +35,6 @@ def flatten_pages(items):
 def inspect(number, expected_head):
     pr = gh("api", f"repos/{REPO}/pulls/{number}")
     reasons = []
-    if pr["state"] != "open" or pr.get("draft"):
-        reasons.append("PR is closed or draft")
     if pr["base"]["ref"] != "master" or pr["base"]["repo"]["full_name"] != REPO:
         reasons.append("unexpected target repository or branch")
     if pr["user"]["login"] not in ALLOWED or (pr["head"]["repo"] or {}).get("full_name") != REPO:
@@ -48,6 +46,10 @@ def inspect(number, expected_head):
         time.sleep(2)
         pr = gh("api", f"repos/{REPO}/pulls/{number}")
         attempts += 1
+    # The poll can observe a PR after it becomes draft or closed; the open/
+    # draft gates must apply to the freshest response, not the first read.
+    if pr["state"] != "open" or pr.get("draft"):
+        reasons.append("PR is closed or draft")
     # A push can land while re-polling, so the head that review checks and
     # --match-head-commit validate must come from the freshest response, not
     # the first one read before the poll.

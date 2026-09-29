@@ -41,6 +41,8 @@ def fixture(
     mergeable=True,
     transient_none_polls=0,
     head_change_after_polls=None,
+    draft_after_polls=None,
+    state_after_polls=None,
     review_bodies=None,
 ):
     calls = {"pulls": 0}
@@ -52,6 +54,10 @@ def fixture(
         merged["mergeable"] = None if calls["pulls"] <= transient_none_polls else mergeable
         if head_change_after_polls is not None and calls["pulls"] > head_change_after_polls:
             merged["head"] = {"sha": "b" * 40, "repo": {"full_name": head_repo}}
+        if draft_after_polls is not None and calls["pulls"] > draft_after_polls:
+            merged["draft"] = True
+        if state_after_polls is not None and calls["pulls"] > state_after_polls:
+            merged["state"] = "closed"
         return merged
 
     pr = {
@@ -267,6 +273,30 @@ class MergeGateTests(unittest.TestCase):
         ):
             reasons = gate.inspect(102, SHA)[0]
         self.assertTrue(any("head changed" in r for r in reasons))
+
+    def test_draft_during_mergeable_poll_blocks(self):
+        # The state/draft gates must apply to the freshest polled response:
+        # a PR made draft between the first read and the final poll must not
+        # report merge-ready.
+        with (
+            patch.object(
+                gate, "gh", side_effect=fixture(transient_none_polls=1, draft_after_polls=1)
+            ),
+            patch.object(gate.time, "sleep", return_value=None),
+        ):
+            reasons = gate.inspect(102, SHA)[0]
+        self.assertTrue(any("closed or draft" in r for r in reasons))
+
+    def test_closed_during_mergeable_poll_blocks(self):
+        # Same freshness requirement for a PR closed mid-poll.
+        with (
+            patch.object(
+                gate, "gh", side_effect=fixture(transient_none_polls=1, state_after_polls=1)
+            ),
+            patch.object(gate.time, "sleep", return_value=None),
+        ):
+            reasons = gate.inspect(102, SHA)[0]
+        self.assertTrue(any("closed or draft" in r for r in reasons))
 
     def test_missing_repo_workflow_blocks(self):
         self.assertTrue(
