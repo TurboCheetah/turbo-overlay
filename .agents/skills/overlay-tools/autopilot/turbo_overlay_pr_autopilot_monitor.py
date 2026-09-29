@@ -18,6 +18,9 @@ CONFIG = Path(
 BOT_LOGINS = {"coderabbitai", "coderabbitai[bot]", "cubic-dev-ai", "cubic-dev-ai[bot]"}
 # GitHub pages review threads at 100; this bounds a pathological PR (20k threads).
 MAX_THREAD_PAGES = 200
+# A thread can also exceed 100 comments; bound the per-thread comment
+# pagination so an edit on a later comment page still fingerprints it.
+MAX_THREAD_COMMENT_PAGES = 20
 # `gh pr list --limit N` paginates internally; cap the single request so a
 # broken API cannot hang the sweep forever (50 pages = 5000 open PRs, far
 # beyond this repository) and fail loudly if the cap is reached.
@@ -37,6 +40,37 @@ def digest(text):
     return hashlib.sha256((text or "").encode()).hexdigest()[:16]
 
 
+def fetch_thread_comments(thread):
+    """Fetch every comment page for one review-thread node, bounded.
+
+    The thread-list query requests only the first 100 comments per thread;
+    an edit on a later comment page of an oversized thread would therefore
+    not change thread_state_key. Pull the remaining pages through the
+    thread's node id so the fingerprint covers the whole thread.
+    """
+    for _ in range(MAX_THREAD_COMMENT_PAGES):
+        comments = thread.get("comments") or {}
+        page_info = comments.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            return
+        page = gh(
+            "api",
+            "graphql",
+            "-f",
+            "query=query($id:ID!, $cursor:String) { node(id:$id) { "
+            "... on PullRequestReviewThread { comments(first:100, after:$cursor) { "
+            "nodes { databaseId body } pageInfo { hasNextPage endCursor } } } } }",
+            "-F",
+            f"id={thread['id']}",
+            *([] if not page_info.get("endCursor") else ["-F", f"cursor={page_info['endCursor']}"]),
+        )
+        data = page["data"]["node"]["comments"]
+        thread["comments"] = {
+            "nodes": (comments.get("nodes") or []) + data["nodes"],
+            "pageInfo": data["pageInfo"],
+        }
+
+
 def fetch_threads(number):
     """Fetch every review-thread node for a PR, bounded by a safety cap.
 
@@ -48,7 +82,10 @@ def fetch_threads(number):
     threads independently). Cubic flagged that the digest also missed
     replies or edits inside an existing thread, so each thread includes a
     digest of its comments (bounded at 100; the hasNextPage marker is part
-    of the digest so an oversized thread still changes it).
+    of the digest so an oversized thread still changes it). CodeRabbit
+    then flagged that only the first comments page was fetched: a later
+    page edit went unnoticed, so each thread's comments are paginated in
+    full (still cap-bounded).
     """
     nodes = []
     cursor = None
@@ -67,11 +104,13 @@ def fetch_threads(number):
             "repository(owner:$owner, name:$name) { pullRequest(number:$number) { "
             "reviewThreads(first:100, after:$cursor) { nodes { id isResolved "
             "comments(first:100) { nodes { databaseId body } "
-            "pageInfo { hasNextPage } } } "
+            "pageInfo { hasNextPage endCursor } } } "
             "pageInfo { hasNextPage endCursor } } } } }",
             *([] if cursor is None else ["-F", f"cursor={cursor}"]),
         )
         data = page["data"]["repository"]["pullRequest"]["reviewThreads"]
+        for thread in data["nodes"]:
+            fetch_thread_comments(thread)
         nodes.extend(data["nodes"])
         if not data["pageInfo"]["hasNextPage"]:
             return nodes, False

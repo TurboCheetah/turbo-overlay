@@ -751,6 +751,81 @@ class MonitorTests(unittest.TestCase):
             second = monitor.snapshot()["prs"][0]["threads_digest"]
         self.assertNotEqual(first, second)
 
+    def test_second_comment_page_change_changes_threads_digest(self):
+        # A thread can exceed the 100-comment page the thread-list query
+        # fetches; an edit on a later comment page must still be reflected
+        # in the fingerprint so the sweep reconciles it.
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        pr = {
+            "number": 102,
+            "headRefOid": SHA,
+            "baseRefName": "master",
+            "author": {"login": "TurboCheetah"},
+            "isDraft": False,
+            "statusCheckRollup": [],
+            "latestReviews": [],
+        }
+
+        def threads(first_page_body):
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "id": "PRRT_x",
+                                        "isResolved": False,
+                                        "comments": {
+                                            "nodes": [{"databaseId": 1, "body": first_page_body}],
+                                            "pageInfo": {"hasNextPage": True, "endCursor": "cc1"},
+                                        },
+                                    }
+                                ],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        def second_page(second_page_body):
+            return {
+                "data": {
+                    "node": {
+                        "comments": {
+                            "nodes": [{"databaseId": 2, "body": second_page_body}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                }
+            }
+
+        calls = {"second_body": "second page one", "first_body": "first page one"}
+
+        def fake_gh(*args):
+            if args[1].endswith("/comments"):
+                return [[]]
+            if args[0] == "pr":
+                return [pr]
+            # The per-thread comment pagination call targets the node id;
+            # the thread-list query carries the PR number.
+            if "id=PRRT_x" in args:
+                return second_page(calls["second_body"])
+            return threads(calls["first_body"])
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            first = monitor.snapshot()["prs"][0]["threads_digest"]
+            calls["second_body"] = "second page edited"
+            second = monitor.snapshot()["prs"][0]["threads_digest"]
+        self.assertNotEqual(first, second)
+
     def test_per_pr_fetch_failure_does_not_blank_snapshot(self):
         class Config:
             def read_text(self):
