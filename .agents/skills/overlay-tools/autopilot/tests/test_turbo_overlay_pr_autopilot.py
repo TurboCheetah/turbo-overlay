@@ -1,6 +1,8 @@
 """Unit tests for the PR autopilot's fail-closed merge decision."""
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -28,6 +30,8 @@ def fixture(
     *,
     author="TurboCheetah",
     head_repo=gate.REPO,
+    base_ref="master",
+    base_repo=gate.REPO,
     review_head=SHA,
     failed_check=False,
     unresolved=False,
@@ -64,7 +68,7 @@ def fixture(
         "state": state,
         "draft": draft,
         "head": {"sha": SHA, "repo": {"full_name": head_repo}},
-        "base": {"ref": "master", "repo": {"full_name": gate.REPO}},
+        "base": {"ref": base_ref, "repo": {"full_name": base_repo}},
         "user": {"login": author},
         "mergeable": mergeable,
         "mergeable_state": mergeable_state,
@@ -144,6 +148,23 @@ class MergeGateTests(unittest.TestCase):
 
     def test_green_authorized_head(self):
         self.assertEqual(self.check(), [])
+
+    def test_green_path_returns_freshest_head(self):
+        # The merge path passes inspect's head to --match-head-commit and
+        # judges bot-review freshness against it; a regression returning a
+        # stale first-read head must not pass.
+        with patch.object(gate, "gh", side_effect=fixture(transient_none_polls=1)):
+            reasons, head = gate.inspect(102, SHA)
+        self.assertEqual(reasons, [])
+        self.assertEqual(head, SHA)
+
+    def test_unexpected_target_branch_blocks(self):
+        reasons = self.check(base_ref="dev")
+        self.assertTrue(any("target repository or branch" in r for r in reasons))
+
+    def test_unexpected_target_repo_blocks(self):
+        reasons = self.check(base_repo="outside/turbo-overlay")
+        self.assertTrue(any("target repository or branch" in r for r in reasons))
 
     def test_external_fork_never_merges(self):
         reasons = self.check(head_repo="outside/turbo-overlay")
@@ -227,11 +248,14 @@ class MergeGateTests(unittest.TestCase):
         self.assertEqual(self.check(human_reviews=[(None, SHA, "COMMENTED")]), [])
 
     def test_missing_gh_reports_blocked_without_traceback(self):
+        stderr = io.StringIO()
         with (
             patch.object(gate, "gh", side_effect=FileNotFoundError("gh")),
             patch.object(sys, "argv", ["gate", "102", SHA]),
+            contextlib.redirect_stderr(stderr),
         ):
             self.assertEqual(gate.main(), 1)
+        self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_draft_blocks(self):
         self.assertTrue(any("closed or draft" in r for r in self.check(draft=True)))

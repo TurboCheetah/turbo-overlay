@@ -32,7 +32,18 @@ PR_LIST_FIELDS = (
 
 
 def gh(*args):
-    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True, timeout=90)
+    try:
+        result = subprocess.run(
+            ["gh", *args], check=True, capture_output=True, text=True, timeout=90
+        )
+    except subprocess.CalledProcessError as exc:
+        # str(CalledProcessError) only carries the exit code; include gh's
+        # stderr so an unattended sweep failure is actually diagnosable
+        # (rate limits, auth expiry, API errors).
+        raise subprocess.SubprocessError(
+            f"gh {' '.join(args)} failed ({exc.returncode}): "
+            f"{(exc.stderr or '').strip() or '(no stderr)'}"
+        ) from exc
     return json.loads(result.stdout)
 
 
@@ -213,7 +224,7 @@ def snapshot_pr(pr):
             }
             for c in pr["statusCheckRollup"]
         ],
-        key=lambda c: str(c["name"]),
+        key=lambda c: (str(c["name"]), str(c["status"]), str(c["conclusion"])),
     )
     thread_nodes, threads_truncated = fetch_threads(pr["number"])
     thread_state = sorted(thread_state_key(t) for t in thread_nodes)
