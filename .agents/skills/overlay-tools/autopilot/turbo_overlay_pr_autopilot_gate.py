@@ -100,9 +100,8 @@ def coderabbit_comment_coverage(number, head, comments, review):
     candidates = [
         c
         for c in comments
-        if (
-            (c.get("user") or {}).get("login") or ""
-        ).lower().removesuffix("[bot]") == "coderabbitai"
+        if ((c.get("user") or {}).get("login") or "").lower().removesuffix("[bot]")
+        == "coderabbitai"
         and (c.get("updated_at") or "") >= submitted_at
         and not RABBIT_RATE_LIMIT.search(c.get("body") or "")
         and RABBIT_COVERED.search(c.get("body") or "")
