@@ -175,7 +175,7 @@ def fixture(
         }
     }
 
-    def fake_gh(*args):
+    def fake_gh(*args, **_):
         if args[0] == "pr":
             return details
         if args[0] == "api" and args[1].endswith("/check-runs"):
@@ -694,7 +694,7 @@ class MonitorTests(unittest.TestCase):
             ]
         ]
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr]
             return rest_comments if args[1].endswith("/comments") else graphql
@@ -747,7 +747,7 @@ class MonitorTests(unittest.TestCase):
                 }
             }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -804,7 +804,7 @@ class MonitorTests(unittest.TestCase):
             }
         }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -858,7 +858,7 @@ class MonitorTests(unittest.TestCase):
             }
         }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             return [pr] if args[0] == "pr" else endless
@@ -897,7 +897,7 @@ class MonitorTests(unittest.TestCase):
             "latestReviews": [],
         }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr]
             if args[1].endswith("/comments"):
@@ -943,7 +943,7 @@ class MonitorTests(unittest.TestCase):
 
         clock = [0.0]
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr(102), pr(103), pr(104)]
             if args[1].endswith("/comments"):
@@ -996,7 +996,7 @@ class MonitorTests(unittest.TestCase):
         clock = [0.0]
         comment_fetches = []
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr(102), pr(103)]
             if args[1].endswith("/comments"):
@@ -1018,16 +1018,50 @@ class MonitorTests(unittest.TestCase):
 
         with (
             patch.object(monitor, "CONFIG", Config()),
-            patch.object(monitor, "SWEEP_DEADLINE_SECONDS", 40),
+            patch.object(monitor, "SWEEP_DEADLINE_SECONDS", 90),
             patch.object(monitor.time, "monotonic", side_effect=lambda: clock[0]),
             patch.object(monitor, "gh", side_effect=fake_gh),
         ):
             prs = {p["number"]: p for p in monitor.snapshot()["prs"]}
-        # The newest PR is fetched first; the oldest one is what runs out.
+        # The newest PR is fetched first; the oldest one is what runs out:
+        # its thread page returns at 100 s, after the 90 s sweep deadline, so
+        # the late completion is rejected rather than accepted as a snapshot.
         self.assertNotIn("error", prs[103])
         self.assertIn("sweep deadline", prs[102]["error"])
-        # An exhausted budget stops the PR before its comment fetch.
-        self.assertEqual(comment_fetches, [103])
+        self.assertEqual(comment_fetches, [103, 102])
+
+    def test_gh_timeout_is_capped_by_remaining_budget(self):
+        timeouts = []
+
+        def slow_gh(*args, timeout=monitor.GH_TIMEOUT_SECONDS):
+            timeouts.append(timeout)
+            raise subprocess.TimeoutExpired(["gh", *args], timeout)
+
+        with (
+            patch.object(monitor.time, "monotonic", return_value=100.0),
+            patch.object(monitor, "gh", side_effect=slow_gh),
+            self.assertRaises(monitor.DeadlineExceeded),
+        ):
+            monitor.fetch_bot_comments(102, deadline=130.0)
+        self.assertEqual(timeouts, [30.0])
+
+    def test_gh_timeout_beyond_budget_keeps_its_own_error(self):
+        # With more budget left than the gh timeout, a timeout is a gh failure,
+        # not a budget expiry.
+        def slow_gh(*args, timeout=monitor.GH_TIMEOUT_SECONDS):
+            raise subprocess.TimeoutExpired(["gh", *args], timeout)
+
+        with (
+            patch.object(monitor.time, "monotonic", return_value=0.0),
+            patch.object(monitor, "gh", side_effect=slow_gh),
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
+            monitor.fetch_bot_comments(102, deadline=500.0)
+
+    def test_expired_budget_makes_no_comment_call(self):
+        with patch.object(monitor, "gh") as fetched, self.assertRaises(monitor.DeadlineExceeded):
+            monitor.fetch_bot_comments(102, deadline=-1.0)
+        fetched.assert_not_called()
 
     def test_bot_comments_span_every_page_and_ignore_order(self):
         class Config:
@@ -1060,7 +1094,7 @@ class MonitorTests(unittest.TestCase):
         early_bot = {"user": {"login": "coderabbitai[bot]"}, "body": "summary"}
 
         def run(pages):
-            def fake_gh(*args):
+            def fake_gh(*args, **_):
                 if args[0] == "pr":
                     return [pr]
                 return pages if args[1].endswith("/comments") else threads
@@ -1117,7 +1151,7 @@ class MonitorTests(unittest.TestCase):
 
         calls = {"comment_edited": False}
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -1189,7 +1223,7 @@ class MonitorTests(unittest.TestCase):
 
         calls = {"second_body": "second page one", "first_body": "first page one"}
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -1225,7 +1259,7 @@ class MonitorTests(unittest.TestCase):
                 "latestReviews": [],
             }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr(102), pr(103)]
             if args[1].endswith("/comments"):
@@ -1273,7 +1307,7 @@ class MonitorTests(unittest.TestCase):
 
         calls = {"list": 0}
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 calls["list"] += 1
                 # A single `--limit` request returns more than one API page
@@ -1322,7 +1356,7 @@ class MonitorTests(unittest.TestCase):
                 "latestReviews": [],
             }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 # A repo with more open PRs than the cap would be truncated
                 # silently by the API; the monitor must fail loudly instead.
