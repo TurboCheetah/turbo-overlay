@@ -973,7 +973,8 @@ class MonitorTests(unittest.TestCase):
         # PR 102 runs after the oversized PR 103 and still gets a snapshot.
         self.assertEqual([p["number"] for p in prs], [102, 103, 104])
         self.assertNotIn("error", prs[0])
-        self.assertIn("sweep deadline", prs[1]["error"])
+        self.assertIn("exceeded its 60s budget", prs[1]["error"])
+        self.assertNotIn("sweep deadline", prs[1]["error"])
         self.assertNotIn("error", prs[2])
 
     def test_exhausted_sweep_leaves_oldest_prs_unsnapshotted(self):
@@ -993,11 +994,13 @@ class MonitorTests(unittest.TestCase):
             }
 
         clock = [0.0]
+        comment_fetches = []
 
         def fake_gh(*args):
             if args[0] == "pr":
                 return [pr(102), pr(103)]
             if args[1].endswith("/comments"):
+                comment_fetches.append(int(args[1].split("/")[-2]))
                 return [[]]
             clock[0] += 50  # every thread page is slow
             return {
@@ -1023,6 +1026,8 @@ class MonitorTests(unittest.TestCase):
         # The newest PR is fetched first; the oldest one is what runs out.
         self.assertNotIn("error", prs[103])
         self.assertIn("sweep deadline", prs[102]["error"])
+        # An exhausted budget stops the PR before its comment fetch.
+        self.assertEqual(comment_fetches, [103])
 
     def test_bot_comments_span_every_page_and_ignore_order(self):
         class Config:

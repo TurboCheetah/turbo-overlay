@@ -62,15 +62,19 @@ def digest(text):
     return hashlib.sha256((text or "").encode()).hexdigest()[:16]
 
 
-def _past_deadline(deadline):
-    """Raise when the sweep budget is exhausted before a thread fetch finishes.
+class DeadlineExceeded(ValueError):
+    """The PR's time budget ran out before its snapshot finished."""
 
-    ValueError is caught by the per-PR handler in snapshot(), so the
-    oversized PR is surfaced as an error entry and the rest of the sweep
-    can proceed; the next cron run retries.
+
+def _past_deadline(deadline):
+    """Raise when the budget is exhausted before a PR's fetches finish.
+
+    snapshot() catches this per PR and labels whether the PR's own budget or
+    the whole sweep ran out, so the oversized PR is surfaced as an error
+    entry and the rest of the sweep can proceed; the next cron run retries.
     """
     if deadline is not None and time.monotonic() > deadline:
-        raise ValueError("review-thread fetch exceeded sweep deadline; manual review needed")
+        raise DeadlineExceeded("review-thread fetch exceeded sweep deadline; manual review needed")
 
 
 def fetch_thread_comments(thread, deadline=None):
@@ -211,9 +215,25 @@ def snapshot():
     for pr in sorted(prs, key=lambda p: p["number"], reverse=True):
         if pr["number"] <= cutoff:
             continue
-        deadline = min(sweep_deadline, time.monotonic() + PR_DEADLINE_SECONDS)
+        pr_deadline = time.monotonic() + PR_DEADLINE_SECONDS
+        deadline = min(sweep_deadline, pr_deadline)
         try:
             output.append(snapshot_pr(pr, deadline=deadline))
+        except DeadlineExceeded:
+            # Distinguish one slow PR (healthy sweep, retried next run) from
+            # a sweep that ran out of time for every remaining PR.
+            reason = (
+                f"PR exceeded its {PR_DEADLINE_SECONDS}s budget"
+                if pr_deadline < sweep_deadline
+                else "review-thread fetch exceeded sweep deadline"
+            )
+            output.append(
+                {
+                    "number": pr["number"],
+                    "head": pr.get("headRefOid"),
+                    "error": f"per-PR fetch failed: {reason}; manual review needed",
+                }
+            )
         except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
             # One PR's transient fetch failure must not blank the whole sweep:
             # keep the other PRs and mark the failed one so the change is
@@ -229,6 +249,8 @@ def snapshot():
 
 
 def snapshot_pr(pr, deadline=None):
+    # Check before the comment fetch too, so an expired budget costs no API call.
+    _past_deadline(deadline)
     reviews = sorted(
         (
             {
