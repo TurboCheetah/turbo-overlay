@@ -29,6 +29,9 @@ MAX_THREAD_COMMENT_PAGES = 20
 # sweep; a PR that cannot finish within it is surfaced as a per-PR error
 # for manual review instead of monopolizing the run.
 SWEEP_DEADLINE_SECONDS = 240
+# Each PR also gets its own share of the sweep, so one oversized PR fails
+# alone instead of exhausting the budget for every PR after it.
+PR_DEADLINE_SECONDS = 60
 # `gh pr list --limit N` paginates internally; cap the single request so a
 # broken API cannot hang the sweep forever (50 pages = 5000 open PRs, far
 # beyond this repository) and fail loudly if the cap is reached.
@@ -202,10 +205,13 @@ def snapshot():
         # __main__ handler, which emits the designed failure message).
         raise ValueError(f"PR list hit safety cap at {len(prs)} open PRs; manual review needed")
     output = []
-    deadline = time.monotonic() + SWEEP_DEADLINE_SECONDS
-    for pr in sorted(prs, key=lambda p: p["number"]):
+    sweep_deadline = time.monotonic() + SWEEP_DEADLINE_SECONDS
+    # Newest first: if the whole sweep still runs out, the PRs left without a
+    # snapshot are the oldest ones, not the new PRs the automation exists for.
+    for pr in sorted(prs, key=lambda p: p["number"], reverse=True):
         if pr["number"] <= cutoff:
             continue
+        deadline = min(sweep_deadline, time.monotonic() + PR_DEADLINE_SECONDS)
         try:
             output.append(snapshot_pr(pr, deadline=deadline))
         except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
@@ -219,7 +225,7 @@ def snapshot():
                     "error": f"per-PR fetch failed: {exc}",
                 }
             )
-    return {"repository": REPO, "prs": output}
+    return {"repository": REPO, "prs": sorted(output, key=lambda p: p["number"])}
 
 
 def snapshot_pr(pr, deadline=None):

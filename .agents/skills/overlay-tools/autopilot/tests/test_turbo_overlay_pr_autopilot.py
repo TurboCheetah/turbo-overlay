@@ -69,6 +69,7 @@ def fixture(
     trailing_reviews=(),
     rabbit_coverage=None,
     rabbit_comment_updated=None,
+    rabbit_coverage_login="coderabbitai[bot]",
 ):
     calls = {"pulls": 0}
     if cubic_runs is None:
@@ -146,7 +147,7 @@ def fixture(
             ),
             (
                 {
-                    "user": {"login": "coderabbitai[bot]"},
+                    "user": {"login": rabbit_coverage_login},
                     "body": (
                         "<!-- final_review_risk_coverage:"
                         '{"sourceCommitId":"' + rabbit_coverage + '",'
@@ -263,6 +264,16 @@ class MergeGateTests(unittest.TestCase):
         # some other commit cannot be extended to the current head.
         reasons = self.check(review_head="b" * 40, rabbit_coverage=SHA)
         self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
+
+    def test_rabbit_summary_coverage_requires_exact_bot_login(self):
+        # A user account whose login matches the bot minus "[bot]" is not the app.
+        for login in ("coderabbitai", "CodeRabbitAI[bot]", "someone"):
+            reasons = self.check(
+                review_head=OLD_SHA, rabbit_coverage=SHA, rabbit_coverage_login=login
+            )
+            self.assertIn(
+                "coderabbitai has not completed a substantive current-head review", reasons, login
+            )
 
     def test_rabbit_summary_coverage_rate_limited_comment_blocks(self):
         # A rate-limited summary edit must not count as current-head coverage.
@@ -913,6 +924,105 @@ class MonitorTests(unittest.TestCase):
         self.assertIn("error", out["prs"][0])
         self.assertIn("sweep deadline", out["prs"][0]["error"])
         self.assertEqual(out["prs"][0]["number"], 102)
+
+    def test_oversized_pr_fails_alone_within_its_own_budget(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        clock = [0.0]
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                return [pr(102), pr(103), pr(104)]
+            if args[1].endswith("/comments"):
+                return [[]]
+            slow = "number=103" in args
+            if slow:
+                clock[0] += 100  # each page of PR 103 takes longer than its budget
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": slow, "endCursor": "c1"},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = monitor.snapshot()["prs"]
+        # PR 102 runs after the oversized PR 103 and still gets a snapshot.
+        self.assertEqual([p["number"] for p in prs], [102, 103, 104])
+        self.assertNotIn("error", prs[0])
+        self.assertIn("sweep deadline", prs[1]["error"])
+        self.assertNotIn("error", prs[2])
+
+    def test_exhausted_sweep_leaves_oldest_prs_unsnapshotted(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        clock = [0.0]
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                return [pr(102), pr(103)]
+            if args[1].endswith("/comments"):
+                return [[]]
+            clock[0] += 50  # every thread page is slow
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "SWEEP_DEADLINE_SECONDS", 40),
+            patch.object(monitor.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = {p["number"]: p for p in monitor.snapshot()["prs"]}
+        # The newest PR is fetched first; the oldest one is what runs out.
+        self.assertNotIn("error", prs[103])
+        self.assertIn("sweep deadline", prs[102]["error"])
 
     def test_bot_comments_span_every_page_and_ignore_order(self):
         class Config:
