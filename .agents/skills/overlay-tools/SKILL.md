@@ -140,6 +140,14 @@ failure (repos.conf, overlay registration), `127` = `uv` is not installed. Other
 non-zero codes come from `docker run` itself (e.g. `137` if the container is
 killed).
 
+### Review new PRs
+
+The [PR autopilot](autopilot/README.md) holds the webhook filter, stable-state
+monitor, fail-closed merge gate, and tests. Its review policy is in
+[`turbo-overlay-pr-autopilot`](../turbo-overlay-pr-autopilot/SKILL.md).
+It does not process PRs created before its local activation baseline.
+Secrets, webhook registration, cron schedule, and state stay outside Git.
+
 ## Requirements
 
 - **uv** - Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`

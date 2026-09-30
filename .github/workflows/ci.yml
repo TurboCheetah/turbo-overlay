@@ -56,7 +56,7 @@ jobs:
 
       - name: ty
         working-directory: .agents/skills/overlay-tools
-        run: uv run ty check src
+        run: uv run ty check src autopilot
 
       - name: pytest
         working-directory: .agents/skills/overlay-tools

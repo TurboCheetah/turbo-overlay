@@ -20,7 +20,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "autopilot/tests"]
 addopts = ["-v", "--tb=short"]
 
 [tool.ruff]
