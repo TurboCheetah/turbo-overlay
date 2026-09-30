@@ -14,6 +14,15 @@ BOTS = {"coderabbitai", "cubic-dev-ai"}
 # marker, not free text: its edited summary comment can quote code or old notes.
 RABBIT_RATE_LIMIT = re.compile(r"<!--[^>]*rate limit[^>]*coderabbit\.ai[^>]*-->", re.IGNORECASE)
 CUBIC_CLEAN = re.compile(r"\b0 issues found\b")
+# CodeRabbit publishes a substantive current-head review either as a review
+# submission (when a run produces actionable comments) or by editing its
+# persistent summary comment, which then embeds a final_review_risk_coverage
+# marker naming the exact commit it covered. Match the marker's JSON fields,
+# not free text.
+RABBIT_COVERED = re.compile(
+    r"final_review_risk_coverage:\{\"sourceCommitId\":\"([0-9a-f]{40})\","
+    r"\"coveredCommitId\":\"([0-9a-f]{40})\",\"kind\":\"reviewed\"\}"
+)
 
 
 def _visible_body(body):
@@ -74,6 +83,45 @@ def cubic_clean_followup(number, head, reviewed):
         gh("api", f"repos/{REPO}/pulls/{number}/commits", "--paginate", "--slurp")
     )
     return reviewed in {c["sha"] for c in commits}
+
+
+def coderabbit_comment_coverage(number, head, comments, review):
+    """Accept CodeRabbit's edited summary comment as a current-head review.
+
+    CodeRabbit posts a review submission only when a run produces actionable
+    comments; a clean run only edits its persistent summary comment, which
+    then embeds a final_review_risk_coverage marker naming the exact commit
+    it covered. Accept the marker only on the bot's own comment updated after
+    the older submission, when it names the current head with kind
+    "reviewed", and when the older review covered an earlier commit of this
+    PR. A rate-limit marker in the same comment disqualifies it.
+    """
+    submitted_at = review.get("submitted_at") or ""
+    candidates = [
+        c
+        for c in comments
+        if (
+            (c.get("user") or {}).get("login") or ""
+        ).lower().removesuffix("[bot]") == "coderabbitai"
+        and (c.get("updated_at") or "") >= submitted_at
+        and not RABBIT_RATE_LIMIT.search(c.get("body") or "")
+        and RABBIT_COVERED.search(c.get("body") or "")
+    ]
+    if not candidates:
+        return False
+    # The summary comment carrying the marker is edited in place; later bot
+    # replies ("Full review finished") can have newer updated_at without the
+    # marker, so pick the newest comment that actually embeds the marker.
+    comment = max(candidates, key=lambda c: c.get("updated_at") or "")
+    m = RABBIT_COVERED.search(comment.get("body") or "")
+    assert m is not None  # candidates are pre-filtered to marker-bearing comments
+    source, target = m.groups()
+    if source != head or target != head:
+        return False
+    commits = flatten_pages(
+        gh("api", f"repos/{REPO}/pulls/{number}/commits", "--paginate", "--slurp")
+    )
+    return review.get("commit_id") in {c["sha"] for c in commits}
 
 
 def inspect(number, expected_head):
@@ -144,6 +192,10 @@ def inspect(number, expected_head):
     for login, state in sorted(verdicts.items()):
         if state == "CHANGES_REQUESTED":
             reasons.append(f"changes requested by {login} and not approved or dismissed")
+
+    comments = flatten_pages(
+        gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
+    )
     for bot in sorted(BOTS):
         review = latest.get(bot)
         if not review or review["state"] not in {"APPROVED", "COMMENTED"}:
@@ -153,14 +205,18 @@ def inspect(number, expected_head):
             # Match only that marker: a review body explaining or quoting the
             # rate-limit check must not be mistaken for a rate-limited review.
             reasons.append(f"{bot} review was rate-limited")
-        elif review["commit_id"] != head and not (
-            bot == "cubic-dev-ai" and cubic_clean_followup(number, head, review["commit_id"])
+        elif (
+            review["commit_id"] != head
+            and not (
+                bot == "cubic-dev-ai" and cubic_clean_followup(number, head, review["commit_id"])
+            )
+            and not (
+                bot == "coderabbitai"
+                and coderabbit_comment_coverage(number, head, comments, review)
+            )
         ):
             reasons.append(f"{bot} has not completed a substantive current-head review")
 
-    comments = flatten_pages(
-        gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
-    )
     rabbit = latest.get("coderabbitai")
     for comment in comments:
         user = ((comment.get("user") or {}).get("login") or "").lower().removesuffix("[bot]")

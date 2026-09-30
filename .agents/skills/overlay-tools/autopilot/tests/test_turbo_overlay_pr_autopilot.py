@@ -67,6 +67,8 @@ def fixture(
     cubic_runs=None,
     pr_commits=None,
     trailing_reviews=(),
+    rabbit_coverage=None,
+    rabbit_comment_updated=None,
 ):
     calls = {"pulls": 0}
     if cubic_runs is None:
@@ -130,17 +132,35 @@ def fixture(
         + reviews
         + list(trailing_reviews)
     )
-    comments = (
-        [
-            {
-                "user": {"login": "coderabbitai[bot]"},
-                "body": rabbit_comment,
-                "updated_at": "2026-09-28T17:02:00Z",
-            }
+    comments = [
+        entry
+        for entry in [
+            (
+                {
+                    "user": {"login": "coderabbitai[bot]"},
+                    "body": rabbit_comment,
+                    "updated_at": rabbit_comment_updated or "2026-09-28T17:02:00Z",
+                }
+                if rabbit_comment is not None
+                else None
+            ),
+            (
+                {
+                    "user": {"login": "coderabbitai[bot]"},
+                    "body": (
+                        "<!-- final_review_risk_coverage:"
+                        '{"sourceCommitId":"' + rabbit_coverage + '",'
+                        '"coveredCommitId":"' + rabbit_coverage + '",'
+                        '"kind":"reviewed"} -->'
+                    ),
+                    "updated_at": rabbit_comment_updated or "2026-09-28T17:02:00Z",
+                }
+                if rabbit_coverage is not None
+                else None
+            ),
         ]
-        if rabbit_comment is not None
-        else []
-    )
+        if entry is not None
+    ]
     threads = {
         "data": {
             "repository": {
@@ -216,6 +236,44 @@ class MergeGateTests(unittest.TestCase):
     def test_clean_check_does_not_cover_stale_coderabbit_review(self):
         reasons = self.check(review_head=OLD_SHA)
         self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
+
+    def test_rabbit_summary_coverage_covers_followup_commit(self):
+        # CodeRabbit posts no new review submission for a clean follow-up commit;
+        # its edited summary comment carries the coverage marker for the head.
+        reasons = self.check(review_head=OLD_SHA, rabbit_coverage=SHA)
+        self.assertEqual(reasons, [])
+
+    def test_rabbit_summary_coverage_requires_current_head(self):
+        # A coverage marker naming an older commit must not pass for the head.
+        reasons = self.check(review_head=OLD_SHA, rabbit_coverage=OLD_SHA)
+        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
+
+    def test_rabbit_summary_coverage_comment_before_review_blocks(self):
+        # A marker edited before the submitted review is stale, not current-head
+        # coverage; the freshness gate compares against the review submission.
+        reasons = self.check(
+            review_head=OLD_SHA,
+            rabbit_coverage=SHA,
+            rabbit_comment_updated="2026-09-28T16:00:00Z",
+        )
+        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
+
+    def test_rabbit_summary_coverage_requires_pr_membership(self):
+        # The older review must have covered a commit of this PR; a review of
+        # some other commit cannot be extended to the current head.
+        reasons = self.check(review_head="b" * 40, rabbit_coverage=SHA)
+        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
+
+    def test_rabbit_summary_coverage_rate_limited_comment_blocks(self):
+        # A rate-limited summary edit must not count as current-head coverage.
+        body = (
+            "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n"
+            "<!-- final_review_risk_coverage:"
+            '{"sourceCommitId":"' + SHA + '","coveredCommitId":"' + SHA + '",'
+            '"kind":"reviewed"} -->'
+        )
+        reasons = self.check(review_head=OLD_SHA, rabbit_comment=body)
+        self.assertTrue(any("rate-limit" in r or "coderabbitai" in r for r in reasons))
 
     def test_green_path_returns_freshest_head(self):
         # The merge path passes inspect's head to --match-head-commit and

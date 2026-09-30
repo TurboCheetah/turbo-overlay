@@ -28,8 +28,13 @@ outside Git; this PR does not change them.
    standing change requests, unresolved threads, and GitHub merge conflicts.
    Cubic posts no review for a clean follow-up commit, so its successful
    check run on the exact head counts when it reports "0 issues found" and
-   its last review covered an earlier commit of the PR. Empty bot thread-reply
-   reviews are ignored. The `--merge` mode uses
+   its last review covered an earlier commit of the PR. CodeRabbit likewise
+   only posts a review submission when a run produces actionable comments;
+   for a clean run it edits its persistent summary comment, which embeds a
+   `final_review_risk_coverage` marker for the exact head, and that marker
+   counts when it names the current head, the comment was updated after the
+   older review, and that review covered an earlier commit of the PR. Empty
+   bot thread-reply reviews are ignored. The `--merge` mode uses
    `gh pr merge --squash --match-head-commit` without an admin override and
    reads the PR back.
 
