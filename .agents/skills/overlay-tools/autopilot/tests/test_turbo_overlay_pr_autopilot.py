@@ -455,6 +455,56 @@ class MergeGateTests(unittest.TestCase):
         output = str(command.call_args)
         self.assertIn("--squash", output)
 
+    def test_merge_rechecks_inspect_before_merging(self):
+        # --match-head-commit pins only the SHA; a same-head review change
+        # between the first inspect and the merge command must not slip
+        # through, so inspect runs again immediately before the merge.
+        merged = {
+            "merged": True,
+            "head": {"sha": SHA},
+            "html_url": "https://github.com/TurboCheetah/turbo-overlay/pull/102",
+        }
+        with (
+            patch.object(gate, "inspect", return_value=([], SHA)) as inspected,
+            patch.object(gate, "gh", return_value=merged),
+            patch.object(gate.subprocess, "run") as command,
+            patch.object(sys, "argv", ["gate", "102", SHA, "--merge"]),
+        ):
+            self.assertEqual(gate.main(), 0)
+        self.assertEqual(inspected.call_count, 2)
+        command.assert_called_once()
+
+    def test_merge_recheck_blocking_reason_aborts_merge(self):
+        # A reviewer posting a same-head blocker between the two inspects
+        # must abort the merge even though the first inspect was clean.
+        with (
+            patch.object(
+                gate,
+                "inspect",
+                side_effect=[
+                    ([], SHA),
+                    (["coderabbitai has not completed a substantive current-head review"], SHA),
+                ],
+            ),
+            patch.object(gate.subprocess, "run") as command,
+            patch.object(sys, "argv", ["gate", "102", SHA, "--merge"]),
+        ):
+            self.assertEqual(gate.main(), 1)
+        command.assert_not_called()
+
+    def test_gh_failure_includes_stderr(self):
+        # str(CalledProcessError) drops the diagnostic stderr; the re-raise
+        # must carry it so an unattended gate failure is explainable.
+        error = subprocess.CalledProcessError(
+            1, ["gh", "api"], output="", stderr="rate limit exceeded"
+        )
+        with (
+            patch.object(gate.subprocess, "run", side_effect=error),
+            self.assertRaises(subprocess.SubprocessError) as caught,
+        ):
+            gate.gh("api", "repos/TurboCheetah/turbo-overlay/pulls/102")
+        self.assertIn("rate limit exceeded", str(caught.exception))
+
     def test_wrong_sha_blocks(self):
         with patch.object(gate, "gh", side_effect=fixture()):
             reasons, _ = gate.inspect(102, "c" * 40)
@@ -751,6 +801,60 @@ class MonitorTests(unittest.TestCase):
         ):
             out = monitor.snapshot()["prs"][0]
         self.assertTrue(out["threads_truncated"])
+
+    def test_thread_fetch_exceeding_deadline_fails_loudly(self):
+        # A pathological PR must not monopolize a sweep: an expired budget
+        # bails before any further gh call so the cron fallback cannot
+        # overlap an hours-long run.
+        with patch.object(monitor, "gh") as fetched, self.assertRaises(ValueError):
+            monitor.fetch_threads(102, deadline=-1.0)
+        fetched.assert_not_called()
+        with patch.object(monitor, "gh") as fetched, self.assertRaises(ValueError):
+            monitor.fetch_thread_comments({"id": "PRRT_x"}, deadline=-1.0)
+        fetched.assert_not_called()
+
+    def test_deadline_exhaustion_is_a_per_pr_error_not_a_blank_sweep(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        pr = {
+            "number": 102,
+            "headRefOid": SHA,
+            "baseRefName": "master",
+            "author": {"login": "TurboCheetah"},
+            "isDraft": False,
+            "statusCheckRollup": [],
+            "latestReviews": [],
+        }
+
+        def fake_gh(*args):
+            if args[0] == "pr":
+                return [pr]
+            if args[1].endswith("/comments"):
+                return [[]]
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "SWEEP_DEADLINE_SECONDS", -1),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            out = monitor.snapshot()
+        self.assertIn("error", out["prs"][0])
+        self.assertIn("sweep deadline", out["prs"][0]["error"])
+        self.assertEqual(out["prs"][0]["number"], 102)
 
     def test_bot_comments_span_every_page_and_ignore_order(self):
         class Config:

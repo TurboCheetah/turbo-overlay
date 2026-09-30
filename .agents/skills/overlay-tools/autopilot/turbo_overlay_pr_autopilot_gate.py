@@ -22,7 +22,17 @@ def _visible_body(body):
 
 
 def gh(*args):
-    result = subprocess.run(["gh", *args], capture_output=True, text=True, check=True, timeout=90)
+    try:
+        result = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, check=True, timeout=90
+        )
+    except subprocess.CalledProcessError as exc:
+        # str(CalledProcessError) omits stderr; re-raise so an unattended
+        # gate failure is diagnosable (rate limits, auth expiry, API errors).
+        raise subprocess.SubprocessError(
+            f"gh {' '.join(args)} failed ({exc.returncode}): "
+            f"{(exc.stderr or '').strip() or '(no stderr)'}"
+        ) from exc
     return json.loads(result.stdout)
 
 
@@ -210,6 +220,24 @@ def main():
     if not args.merge:
         print(json.dumps({"merge_ready": True, "number": args.number, "head": head}))
         return 0
+    # The first inspect ran moments ago, but a same-head change (new
+    # comment, thread resolution, review decision) can land before the
+    # merge command, and --match-head-commit pins only the SHA. Re-run
+    # every gate immediately before merging so a same-head review change
+    # cannot be merged unnoticed.
+    try:
+        reasons, head = inspect(args.number, args.expected_head)
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+        print(f"BLOCKED: could not verify every gate before merge: {exc}")
+        return 1
+    if reasons:
+        print(
+            json.dumps(
+                {"merge_ready": False, "number": args.number, "head": head, "reasons": reasons},
+                indent=2,
+            )
+        )
+        return 1
     try:
         subprocess.run(
             [

@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO = "TurboCheetah/turbo-overlay"
@@ -21,6 +22,13 @@ MAX_THREAD_PAGES = 200
 # A thread can also exceed 100 comments; bound the per-thread comment
 # pagination so an edit on a later comment page still fingerprints it.
 MAX_THREAD_COMMENT_PAGES = 20
+# A pathological PR (200 thread pages x up to 20 comment pages, 90s per gh
+# call) could otherwise hold a single sweep for hours while the cron
+# fallback fires every 10 minutes, producing overlapping sweeps and
+# secondary rate-limit hits. Budget a wall-clock deadline for the whole
+# sweep; a PR that cannot finish within it is surfaced as a per-PR error
+# for manual review instead of monopolizing the run.
+SWEEP_DEADLINE_SECONDS = 240
 # `gh pr list --limit N` paginates internally; cap the single request so a
 # broken API cannot hang the sweep forever (50 pages = 5000 open PRs, far
 # beyond this repository) and fail loudly if the cap is reached.
@@ -51,7 +59,18 @@ def digest(text):
     return hashlib.sha256((text or "").encode()).hexdigest()[:16]
 
 
-def fetch_thread_comments(thread):
+def _past_deadline(deadline):
+    """Raise when the sweep budget is exhausted before a thread fetch finishes.
+
+    ValueError is caught by the per-PR handler in snapshot(), so the
+    oversized PR is surfaced as an error entry and the rest of the sweep
+    can proceed; the next cron run retries.
+    """
+    if deadline is not None and time.monotonic() > deadline:
+        raise ValueError("review-thread fetch exceeded sweep deadline; manual review needed")
+
+
+def fetch_thread_comments(thread, deadline=None):
     """Fetch every comment page for one review-thread node, bounded.
 
     The thread-list query requests only the first 100 comments per thread;
@@ -60,6 +79,7 @@ def fetch_thread_comments(thread):
     thread's node id so the fingerprint covers the whole thread.
     """
     for _ in range(MAX_THREAD_COMMENT_PAGES):
+        _past_deadline(deadline)
         comments = thread.get("comments") or {}
         page_info = comments.get("pageInfo") or {}
         if not page_info.get("hasNextPage"):
@@ -82,7 +102,7 @@ def fetch_thread_comments(thread):
         }
 
 
-def fetch_threads(number):
+def fetch_threads(number, deadline=None):
     """Fetch every review-thread node for a PR, bounded by a safety cap.
 
     CodeRabbit flagged that a first-page-only query made threads_digest and
@@ -101,6 +121,7 @@ def fetch_threads(number):
     nodes = []
     cursor = None
     for _ in range(MAX_THREAD_PAGES):
+        _past_deadline(deadline)
         page = gh(
             "api",
             "graphql",
@@ -121,7 +142,7 @@ def fetch_threads(number):
         )
         data = page["data"]["repository"]["pullRequest"]["reviewThreads"]
         for thread in data["nodes"]:
-            fetch_thread_comments(thread)
+            fetch_thread_comments(thread, deadline=deadline)
         nodes.extend(data["nodes"])
         if not data["pageInfo"]["hasNextPage"]:
             return nodes, False
@@ -181,11 +202,12 @@ def snapshot():
         # __main__ handler, which emits the designed failure message).
         raise ValueError(f"PR list hit safety cap at {len(prs)} open PRs; manual review needed")
     output = []
+    deadline = time.monotonic() + SWEEP_DEADLINE_SECONDS
     for pr in sorted(prs, key=lambda p: p["number"]):
         if pr["number"] <= cutoff:
             continue
         try:
-            output.append(snapshot_pr(pr))
+            output.append(snapshot_pr(pr, deadline=deadline))
         except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
             # One PR's transient fetch failure must not blank the whole sweep:
             # keep the other PRs and mark the failed one so the change is
@@ -200,7 +222,7 @@ def snapshot():
     return {"repository": REPO, "prs": output}
 
 
-def snapshot_pr(pr):
+def snapshot_pr(pr, deadline=None):
     reviews = sorted(
         (
             {
@@ -226,7 +248,7 @@ def snapshot_pr(pr):
         ],
         key=lambda c: (str(c["name"]), str(c["status"]), str(c["conclusion"])),
     )
-    thread_nodes, threads_truncated = fetch_threads(pr["number"])
+    thread_nodes, threads_truncated = fetch_threads(pr["number"], deadline=deadline)
     thread_state = sorted(thread_state_key(t) for t in thread_nodes)
     return {
         "number": pr["number"],
