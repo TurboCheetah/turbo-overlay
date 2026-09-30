@@ -13,6 +13,7 @@ BOTS = {"coderabbitai", "cubic-dev-ai"}
 # CodeRabbit wraps its rate-limit notice in an HTML marker comment. Match the
 # marker, not free text: its edited summary comment can quote code or old notes.
 RABBIT_RATE_LIMIT = re.compile(r"<!--[^>]*rate limit[^>]*coderabbit\.ai[^>]*-->", re.IGNORECASE)
+CUBIC_CLEAN = re.compile(r"\b0 issues found\b")
 
 
 def _visible_body(body):
@@ -30,6 +31,39 @@ def flatten_pages(items):
     if all(isinstance(i, list) for i in items):
         return [item for page in items for item in page]
     return items
+
+
+def cubic_clean_followup(number, head, reviewed):
+    """Accept Cubic's clean check run on `head` when its last review is older.
+
+    Cubic posts no GitHub review for a follow-up commit where it finds nothing
+    and answers re-review requests with "no new changes", so a strict
+    current-head review requirement would block such PRs forever. Its check run
+    on the exact head reports the issue count, so accept only its latest run
+    there when it completed successfully with "0 issues found", and only if the
+    older review covered an earlier commit of this PR.
+    """
+    pages = gh("api", f"repos/{REPO}/commits/{head}/check-runs", "--paginate", "--slurp")
+    runs = [
+        run
+        for page in pages
+        for run in page["check_runs"]
+        if (run.get("app") or {}).get("slug") == "cubic-dev-ai"
+    ]
+    if not runs:
+        return False
+    run = max(runs, key=lambda r: r["id"])
+    if (
+        run.get("head_sha") != head
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "success"
+        or not CUBIC_CLEAN.search((run.get("output") or {}).get("summary") or "")
+    ):
+        return False
+    commits = flatten_pages(
+        gh("api", f"repos/{REPO}/pulls/{number}/commits", "--paginate", "--slurp")
+    )
+    return reviewed in {c["sha"] for c in commits}
 
 
 def inspect(number, expected_head):
@@ -84,7 +118,14 @@ def inspect(number, expected_head):
     for review in reviews:
         login = (review.get("user") or {}).get("login") or "ghost"
         user = login.lower().removesuffix("[bot]")
-        if user in BOTS:
+        # A thread reply is stored as a COMMENTED review with an empty body, so
+        # it must not displace the bot's real review. Other marker-only reviews
+        # are not substantive either (a bot with nothing else stays blocked),
+        # but a rate-limit marker is kept so it is reported as such.
+        body = review.get("body") or ""
+        if user in BOTS and (
+            review["state"] != "COMMENTED" or _visible_body(body) or RABBIT_RATE_LIMIT.search(body)
+        ):
             latest[user] = review
         # GitHub keeps a request for changes in force across later commits until
         # the reviewer approves or it is dismissed; comments do not clear it.
@@ -93,22 +134,18 @@ def inspect(number, expected_head):
     for login, state in sorted(verdicts.items()):
         if state == "CHANGES_REQUESTED":
             reasons.append(f"changes requested by {login} and not approved or dismissed")
-    for bot in BOTS:
+    for bot in sorted(BOTS):
         review = latest.get(bot)
-        if (
-            not review
-            or review["commit_id"] != head
-            or review["state"] not in {"APPROVED", "COMMENTED"}
-        ):
+        if not review or review["state"] not in {"APPROVED", "COMMENTED"}:
             reasons.append(f"{bot} has not completed a substantive current-head review")
         elif RABBIT_RATE_LIMIT.search(review.get("body") or ""):
             # CodeRabbit embeds its rate-limit notice in an HTML marker comment.
             # Match only that marker: a review body explaining or quoting the
             # rate-limit check must not be mistaken for a rate-limited review.
             reasons.append(f"{bot} review was rate-limited")
-        elif review["state"] == "COMMENTED" and not _visible_body(review.get("body")):
-            # A COMMENTED review with no visible content is not a substantive
-            # review of this head; require actual findings or text.
+        elif review["commit_id"] != head and not (
+            bot == "cubic-dev-ai" and cubic_clean_followup(number, head, review["commit_id"])
+        ):
             reasons.append(f"{bot} has not completed a substantive current-head review")
 
     comments = flatten_pages(

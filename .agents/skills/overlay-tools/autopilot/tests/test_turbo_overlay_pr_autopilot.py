@@ -26,6 +26,21 @@ monitor_spec.loader.exec_module(monitor)
 SHA = "a" * 40
 
 
+OLD_SHA = "e" * 40
+
+
+def clean_cubic_run(**changes):
+    return {
+        "id": 1,
+        "app": {"slug": "cubic-dev-ai"},
+        "head_sha": SHA,
+        "status": "completed",
+        "conclusion": "success",
+        "output": {"summary": "AI review completed with 1 review. 0 issues found across 1 file."},
+        **changes,
+    }
+
+
 def fixture(
     *,
     author="TurboCheetah",
@@ -48,8 +63,14 @@ def fixture(
     draft_after_polls=None,
     state_after_polls=None,
     review_bodies=None,
+    cubic_review_head=None,
+    cubic_runs=None,
+    pr_commits=None,
+    trailing_reviews=(),
 ):
     calls = {"pulls": 0}
+    if cubic_runs is None:
+        cubic_runs = [clean_cubic_run()]
 
     def pr_at_call():
         """Return the PR dict, with `mergeable` None for the first polls."""
@@ -90,17 +111,25 @@ def fixture(
     reviews = [
         {
             "user": {"login": name},
-            "commit_id": review_head,
+            "commit_id": (
+                cubic_review_head
+                if name == "cubic-dev-ai[bot]" and cubic_review_head
+                else review_head
+            ),
             "state": "COMMENTED",
             "body": (review_bodies or {}).get(name, "Reviewed"),
             "submitted_at": "2026-09-28T17:00:00Z",
         }
         for name in ("coderabbitai[bot]", "cubic-dev-ai[bot]")
     ]
-    reviews = [
-        {"user": user, "commit_id": commit, "state": state, "body": ""}
-        for user, commit, state in human_reviews
-    ] + reviews
+    reviews = (
+        [
+            {"user": user, "commit_id": commit, "state": state, "body": ""}
+            for user, commit, state in human_reviews
+        ]
+        + reviews
+        + list(trailing_reviews)
+    )
     comments = (
         [
             {
@@ -128,6 +157,11 @@ def fixture(
     def fake_gh(*args):
         if args[0] == "pr":
             return details
+        if args[0] == "api" and args[1].endswith("/check-runs"):
+            return [{"total_count": len(cubic_runs), "check_runs": cubic_runs}]
+        if args[0] == "api" and args[1].endswith("/commits"):
+            shas = pr_commits if pr_commits is not None else [OLD_SHA, SHA]
+            return [[{"sha": sha} for sha in shas]]
         if args[0] == "api" and "graphql" in args:
             return threads
         if args[0] == "api" and "reviews" in args[1]:
@@ -148,6 +182,40 @@ class MergeGateTests(unittest.TestCase):
 
     def test_green_authorized_head(self):
         self.assertEqual(self.check(), [])
+
+    def test_clean_cubic_check_covers_followup_commit(self):
+        self.assertEqual(self.check(cubic_review_head=OLD_SHA), [])
+
+    def test_cubic_check_with_issues_does_not_cover_followup(self):
+        summary = {"summary": "AI review completed with 1 review. 1 issue found across 2 files."}
+        runs = [clean_cubic_run(output=summary)]
+        reasons = self.check(cubic_review_head=OLD_SHA, cubic_runs=runs)
+        self.assertIn("cubic-dev-ai has not completed a substantive current-head review", reasons)
+
+    def test_cubic_fallback_rejects_bad_runs(self):
+        cases = {
+            "missing": [],
+            "in progress": [clean_cubic_run(status="in_progress", conclusion=None)],
+            "failed": [clean_cubic_run(conclusion="failure")],
+            "other head": [clean_cubic_run(head_sha="b" * 40)],
+            "other app": [clean_cubic_run(app={"slug": "impostor"})],
+            # Only the newest run counts; an older clean run is superseded.
+            "superseded": [
+                clean_cubic_run(id=1),
+                clean_cubic_run(id=2, output={"summary": "2 issues found"}),
+            ],
+        }
+        for label, runs in cases.items():
+            reasons = self.check(cubic_review_head=OLD_SHA, cubic_runs=runs)
+            self.assertTrue(any("cubic-dev-ai" in r for r in reasons), label)
+
+    def test_cubic_fallback_requires_review_of_this_pr(self):
+        reasons = self.check(cubic_review_head=OLD_SHA, pr_commits=[SHA])
+        self.assertTrue(any("cubic-dev-ai" in r for r in reasons))
+
+    def test_clean_check_does_not_cover_stale_coderabbit_review(self):
+        reasons = self.check(review_head=OLD_SHA)
+        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
 
     def test_green_path_returns_freshest_head(self):
         # The merge path passes inspect's head to --match-head-commit and
@@ -209,6 +277,17 @@ class MergeGateTests(unittest.TestCase):
         body = "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->"
         reasons = self.check(review_bodies={"coderabbitai[bot]": body})
         self.assertTrue(any("rate-limit" in r for r in reasons))
+
+    def test_bot_thread_reply_does_not_displace_real_review(self):
+        # GitHub stores a thread reply as a COMMENTED review with an empty body.
+        reply = {
+            "user": {"login": "coderabbitai[bot]"},
+            "commit_id": SHA,
+            "state": "COMMENTED",
+            "body": "",
+            "submitted_at": "2026-09-28T18:00:00Z",
+        }
+        self.assertEqual(self.check(trailing_reviews=[reply]), [])
 
     def test_empty_comment_review_blocks(self):
         # A COMMENTED review with no visible content is not a substantive

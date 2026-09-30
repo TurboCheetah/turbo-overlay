@@ -25,7 +25,11 @@ outside Git; this PR does not change them.
 4. Before any autonomous merge, call `turbo_overlay_pr_autopilot_gate.py` with
    the full reviewed head SHA. The gate rejects unauthorized heads, changed
    commits, non-green checks, missing current-head CodeRabbit/Cubic reviews,
-   standing change requests, unresolved threads, and GitHub merge conflicts. The `--merge` mode uses
+   standing change requests, unresolved threads, and GitHub merge conflicts.
+   Cubic posts no review for a clean follow-up commit, so its successful
+   check run on the exact head counts when it reports "0 issues found" and
+   its last review covered an earlier commit of the PR. Empty bot thread-reply
+   reviews are ignored. The `--merge` mode uses
    `gh pr merge --squash --match-head-commit` without an admin override and
    reads the PR back.
 
