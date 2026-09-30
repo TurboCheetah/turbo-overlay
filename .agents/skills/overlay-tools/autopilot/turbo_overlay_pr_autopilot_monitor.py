@@ -29,6 +29,9 @@ MAX_THREAD_COMMENT_PAGES = 20
 # sweep; a PR that cannot finish within it is surfaced as a per-PR error
 # for manual review instead of monopolizing the run.
 SWEEP_DEADLINE_SECONDS = 240
+# Each PR also gets its own share of the sweep, so one oversized PR fails
+# alone instead of exhausting the budget for every PR after it.
+PR_DEADLINE_SECONDS = 60
 # `gh pr list --limit N` paginates internally; cap the single request so a
 # broken API cannot hang the sweep forever (50 pages = 5000 open PRs, far
 # beyond this repository) and fail loudly if the cap is reached.
@@ -39,10 +42,13 @@ PR_LIST_FIELDS = (
 )
 
 
-def gh(*args):
+GH_TIMEOUT_SECONDS = 90
+
+
+def gh(*args, timeout=GH_TIMEOUT_SECONDS):
     try:
         result = subprocess.run(
-            ["gh", *args], check=True, capture_output=True, text=True, timeout=90
+            ["gh", *args], check=True, capture_output=True, text=True, timeout=timeout
         )
     except subprocess.CalledProcessError as exc:
         # str(CalledProcessError) only carries the exit code; include gh's
@@ -59,15 +65,40 @@ def digest(text):
     return hashlib.sha256((text or "").encode()).hexdigest()[:16]
 
 
-def _past_deadline(deadline):
-    """Raise when the sweep budget is exhausted before a thread fetch finishes.
+class DeadlineExceeded(ValueError):
+    """The PR's time budget ran out before its snapshot finished."""
 
-    ValueError is caught by the per-PR handler in snapshot(), so the
-    oversized PR is surfaced as an error entry and the rest of the sweep
-    can proceed; the next cron run retries.
+
+def _past_deadline(deadline):
+    """Raise when the budget is exhausted before a PR's fetches finish.
+
+    snapshot() catches this per PR and labels whether the PR's own budget or
+    the whole sweep ran out, so the oversized PR is surfaced as an error
+    entry and the rest of the sweep can proceed; the next cron run retries.
     """
     if deadline is not None and time.monotonic() > deadline:
-        raise ValueError("review-thread fetch exceeded sweep deadline; manual review needed")
+        raise DeadlineExceeded("review-thread fetch exceeded sweep deadline; manual review needed")
+
+
+def gh_within(deadline, *args):
+    """Run a per-PR gh call that cannot outlast the PR's remaining budget.
+
+    Checking only between calls let one slow call run its full timeout past
+    the budget, so cap the subprocess timeout by the time left and report a
+    budget-capped timeout as DeadlineExceeded.
+    """
+    _past_deadline(deadline)
+    if deadline is None:
+        return gh(*args)
+    remaining = deadline - time.monotonic()
+    if remaining >= GH_TIMEOUT_SECONDS:
+        return gh(*args)
+    try:
+        return gh(*args, timeout=max(remaining, 0.001))
+    except subprocess.TimeoutExpired as exc:
+        raise DeadlineExceeded(
+            "review-thread fetch exceeded sweep deadline; manual review needed"
+        ) from exc
 
 
 def fetch_thread_comments(thread, deadline=None):
@@ -84,7 +115,8 @@ def fetch_thread_comments(thread, deadline=None):
         page_info = comments.get("pageInfo") or {}
         if not page_info.get("hasNextPage"):
             return
-        page = gh(
+        page = gh_within(
+            deadline,
             "api",
             "graphql",
             "-f",
@@ -122,7 +154,8 @@ def fetch_threads(number, deadline=None):
     cursor = None
     for _ in range(MAX_THREAD_PAGES):
         _past_deadline(deadline)
-        page = gh(
+        page = gh_within(
+            deadline,
             "api",
             "graphql",
             "-f",
@@ -168,9 +201,11 @@ def thread_state_key(node):
     return f"{node['id']}:{int(node['isResolved'])}:{comment_digest}"
 
 
-def fetch_bot_comments(number):
+def fetch_bot_comments(number, deadline=None):
     """Hash every bot issue comment; `gh pr list --json comments` stops at one page."""
-    pages = gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
+    pages = gh_within(
+        deadline, "api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp"
+    )
     return sorted(
         (
             {"bot": c["user"]["login"], "body_hash": digest(c.get("body"))}
@@ -202,12 +237,31 @@ def snapshot():
         # __main__ handler, which emits the designed failure message).
         raise ValueError(f"PR list hit safety cap at {len(prs)} open PRs; manual review needed")
     output = []
-    deadline = time.monotonic() + SWEEP_DEADLINE_SECONDS
-    for pr in sorted(prs, key=lambda p: p["number"]):
+    sweep_deadline = time.monotonic() + SWEEP_DEADLINE_SECONDS
+    # Newest first: if the whole sweep still runs out, the PRs left without a
+    # snapshot are the oldest ones, not the new PRs the automation exists for.
+    for pr in sorted(prs, key=lambda p: p["number"], reverse=True):
         if pr["number"] <= cutoff:
             continue
+        pr_deadline = time.monotonic() + PR_DEADLINE_SECONDS
+        deadline = min(sweep_deadline, pr_deadline)
         try:
             output.append(snapshot_pr(pr, deadline=deadline))
+        except DeadlineExceeded:
+            # Distinguish one slow PR (healthy sweep, retried next run) from
+            # a sweep that ran out of time for every remaining PR.
+            reason = (
+                f"PR exceeded its {PR_DEADLINE_SECONDS}s budget"
+                if pr_deadline < sweep_deadline
+                else "review-thread fetch exceeded sweep deadline"
+            )
+            output.append(
+                {
+                    "number": pr["number"],
+                    "head": pr.get("headRefOid"),
+                    "error": f"per-PR fetch failed: {reason}; manual review needed",
+                }
+            )
         except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
             # One PR's transient fetch failure must not blank the whole sweep:
             # keep the other PRs and mark the failed one so the change is
@@ -219,10 +273,12 @@ def snapshot():
                     "error": f"per-PR fetch failed: {exc}",
                 }
             )
-    return {"repository": REPO, "prs": output}
+    return {"repository": REPO, "prs": sorted(output, key=lambda p: p["number"])}
 
 
 def snapshot_pr(pr, deadline=None):
+    # Check before the comment fetch too, so an expired budget costs no API call.
+    _past_deadline(deadline)
     reviews = sorted(
         (
             {
@@ -236,7 +292,7 @@ def snapshot_pr(pr, deadline=None):
         ),
         key=lambda r: (r["bot"], r["at"] or ""),
     )
-    comments = fetch_bot_comments(pr["number"])
+    comments = fetch_bot_comments(pr["number"], deadline=deadline)
     checks = sorted(
         [
             {
@@ -249,6 +305,8 @@ def snapshot_pr(pr, deadline=None):
         key=lambda c: (str(c["name"]), str(c["status"]), str(c["conclusion"])),
     )
     thread_nodes, threads_truncated = fetch_threads(pr["number"], deadline=deadline)
+    # A fetch that finished after the budget ran out does not count.
+    _past_deadline(deadline)
     thread_state = sorted(thread_state_key(t) for t in thread_nodes)
     return {
         "number": pr["number"],

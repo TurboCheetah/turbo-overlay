@@ -69,6 +69,7 @@ def fixture(
     trailing_reviews=(),
     rabbit_coverage=None,
     rabbit_comment_updated=None,
+    rabbit_coverage_login="coderabbitai[bot]",
 ):
     calls = {"pulls": 0}
     if cubic_runs is None:
@@ -146,7 +147,7 @@ def fixture(
             ),
             (
                 {
-                    "user": {"login": "coderabbitai[bot]"},
+                    "user": {"login": rabbit_coverage_login},
                     "body": (
                         "<!-- final_review_risk_coverage:"
                         '{"sourceCommitId":"' + rabbit_coverage + '",'
@@ -174,7 +175,7 @@ def fixture(
         }
     }
 
-    def fake_gh(*args):
+    def fake_gh(*args, **_):
         if args[0] == "pr":
             return details
         if args[0] == "api" and args[1].endswith("/check-runs"):
@@ -263,6 +264,16 @@ class MergeGateTests(unittest.TestCase):
         # some other commit cannot be extended to the current head.
         reasons = self.check(review_head="b" * 40, rabbit_coverage=SHA)
         self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
+
+    def test_rabbit_summary_coverage_requires_exact_bot_login(self):
+        # A user account whose login matches the bot minus "[bot]" is not the app.
+        for login in ("coderabbitai", "CodeRabbitAI[bot]", "someone"):
+            reasons = self.check(
+                review_head=OLD_SHA, rabbit_coverage=SHA, rabbit_coverage_login=login
+            )
+            self.assertIn(
+                "coderabbitai has not completed a substantive current-head review", reasons, login
+            )
 
     def test_rabbit_summary_coverage_rate_limited_comment_blocks(self):
         # A rate-limited summary edit must not count as current-head coverage.
@@ -683,7 +694,7 @@ class MonitorTests(unittest.TestCase):
             ]
         ]
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr]
             return rest_comments if args[1].endswith("/comments") else graphql
@@ -736,7 +747,7 @@ class MonitorTests(unittest.TestCase):
                 }
             }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -793,7 +804,7 @@ class MonitorTests(unittest.TestCase):
             }
         }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -847,7 +858,7 @@ class MonitorTests(unittest.TestCase):
             }
         }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             return [pr] if args[0] == "pr" else endless
@@ -886,7 +897,7 @@ class MonitorTests(unittest.TestCase):
             "latestReviews": [],
         }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr]
             if args[1].endswith("/comments"):
@@ -913,6 +924,144 @@ class MonitorTests(unittest.TestCase):
         self.assertIn("error", out["prs"][0])
         self.assertIn("sweep deadline", out["prs"][0]["error"])
         self.assertEqual(out["prs"][0]["number"], 102)
+
+    def test_oversized_pr_fails_alone_within_its_own_budget(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        clock = [0.0]
+
+        def fake_gh(*args, **_):
+            if args[0] == "pr":
+                return [pr(102), pr(103), pr(104)]
+            if args[1].endswith("/comments"):
+                return [[]]
+            slow = "number=103" in args
+            if slow:
+                clock[0] += 100  # each page of PR 103 takes longer than its budget
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": slow, "endCursor": "c1"},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = monitor.snapshot()["prs"]
+        # PR 102 runs after the oversized PR 103 and still gets a snapshot.
+        self.assertEqual([p["number"] for p in prs], [102, 103, 104])
+        self.assertNotIn("error", prs[0])
+        self.assertIn("exceeded its 60s budget", prs[1]["error"])
+        self.assertNotIn("sweep deadline", prs[1]["error"])
+        self.assertNotIn("error", prs[2])
+
+    def test_exhausted_sweep_leaves_oldest_prs_unsnapshotted(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        def pr(number):
+            return {
+                "number": number,
+                "headRefOid": SHA,
+                "baseRefName": "master",
+                "author": {"login": "TurboCheetah"},
+                "isDraft": False,
+                "statusCheckRollup": [],
+                "latestReviews": [],
+            }
+
+        clock = [0.0]
+        comment_fetches = []
+
+        def fake_gh(*args, **_):
+            if args[0] == "pr":
+                return [pr(102), pr(103)]
+            if args[1].endswith("/comments"):
+                comment_fetches.append(int(args[1].split("/")[-2]))
+                return [[]]
+            clock[0] += 50  # every thread page is slow
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "SWEEP_DEADLINE_SECONDS", 90),
+            patch.object(monitor.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            prs = {p["number"]: p for p in monitor.snapshot()["prs"]}
+        # The newest PR is fetched first; the oldest one is what runs out:
+        # its thread page returns at 100 s, after the 90 s sweep deadline, so
+        # the late completion is rejected rather than accepted as a snapshot.
+        self.assertNotIn("error", prs[103])
+        self.assertIn("sweep deadline", prs[102]["error"])
+        self.assertEqual(comment_fetches, [103, 102])
+
+    def test_gh_timeout_is_capped_by_remaining_budget(self):
+        timeouts = []
+
+        def slow_gh(*args, timeout=monitor.GH_TIMEOUT_SECONDS):
+            timeouts.append(timeout)
+            raise subprocess.TimeoutExpired(["gh", *args], timeout)
+
+        with (
+            patch.object(monitor.time, "monotonic", return_value=100.0),
+            patch.object(monitor, "gh", side_effect=slow_gh),
+            self.assertRaises(monitor.DeadlineExceeded),
+        ):
+            monitor.fetch_bot_comments(102, deadline=130.0)
+        self.assertEqual(timeouts, [30.0])
+
+    def test_gh_timeout_beyond_budget_keeps_its_own_error(self):
+        # With more budget left than the gh timeout, a timeout is a gh failure,
+        # not a budget expiry.
+        def slow_gh(*args, timeout=monitor.GH_TIMEOUT_SECONDS):
+            raise subprocess.TimeoutExpired(["gh", *args], timeout)
+
+        with (
+            patch.object(monitor.time, "monotonic", return_value=0.0),
+            patch.object(monitor, "gh", side_effect=slow_gh),
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
+            monitor.fetch_bot_comments(102, deadline=500.0)
+
+    def test_expired_budget_makes_no_comment_call(self):
+        with patch.object(monitor, "gh") as fetched, self.assertRaises(monitor.DeadlineExceeded):
+            monitor.fetch_bot_comments(102, deadline=-1.0)
+        fetched.assert_not_called()
 
     def test_bot_comments_span_every_page_and_ignore_order(self):
         class Config:
@@ -945,7 +1094,7 @@ class MonitorTests(unittest.TestCase):
         early_bot = {"user": {"login": "coderabbitai[bot]"}, "body": "summary"}
 
         def run(pages):
-            def fake_gh(*args):
+            def fake_gh(*args, **_):
                 if args[0] == "pr":
                     return [pr]
                 return pages if args[1].endswith("/comments") else threads
@@ -1002,7 +1151,7 @@ class MonitorTests(unittest.TestCase):
 
         calls = {"comment_edited": False}
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -1074,7 +1223,7 @@ class MonitorTests(unittest.TestCase):
 
         calls = {"second_body": "second page one", "first_body": "first page one"}
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[1].endswith("/comments"):
                 return [[]]
             if args[0] == "pr":
@@ -1110,7 +1259,7 @@ class MonitorTests(unittest.TestCase):
                 "latestReviews": [],
             }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 return [pr(102), pr(103)]
             if args[1].endswith("/comments"):
@@ -1158,7 +1307,7 @@ class MonitorTests(unittest.TestCase):
 
         calls = {"list": 0}
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 calls["list"] += 1
                 # A single `--limit` request returns more than one API page
@@ -1207,7 +1356,7 @@ class MonitorTests(unittest.TestCase):
                 "latestReviews": [],
             }
 
-        def fake_gh(*args):
+        def fake_gh(*args, **_):
             if args[0] == "pr":
                 # A repo with more open PRs than the cap would be truncated
                 # silently by the API; the monitor must fail loudly instead.
