@@ -24,8 +24,12 @@ outside Git; this PR does not change them.
    [autopilot skill](../../turbo-overlay-pr-autopilot/SKILL.md).
 4. Before any autonomous merge, independently review the exact head and record
    the evidence, then call `turbo_overlay_pr_autopilot_gate.py` with the full
-   reviewed head SHA and `--agent-reviewed`. Bot reviews are additional evidence;
-   their lack of a review seat or paid plan must not veto a sound agent review.
+   reviewed head SHA and `--agent-reviewed`. This applies to every authorized
+   same-repo PR, human-authored `TurboCheetah` and `overlay-bot[bot]` alike:
+   CodeRabbit holds no review seat in this small repository and Cubic may
+   decline bot-authored PRs, so the agent review may not be gated on a seat.
+   Bot reviews are additional evidence; their lack of a review seat or paid
+   plan must not veto a sound agent review.
    The gate still rejects unauthorized heads, changed commits, non-green checks,
    standing change requests, unresolved threads, and GitHub merge conflicts.
    Without `--agent-reviewed`, substantive current-head bot reviews are required.

@@ -196,7 +196,9 @@ def inspect(number, expected_head, *, agent_reviewed=False):
         gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
     )
     # The agent's own review can replace bot reviews that are unavailable for
-    # bot-authored PRs. All GitHub, CI, authorization and thread gates remain.
+    # any authorized same-repo PR (CodeRabbit holds no seat in this small
+    # repository; Cubic may decline bot-authored PRs). All GitHub, CI,
+    # authorization and thread gates remain.
     for bot in sorted(BOTS) if not agent_reviewed else ():
         review = latest.get(bot)
         if not review or review["state"] not in {"APPROVED", "COMMENTED"}:

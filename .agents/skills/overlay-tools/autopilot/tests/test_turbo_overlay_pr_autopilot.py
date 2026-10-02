@@ -214,6 +214,18 @@ class MergeGateTests(unittest.TestCase):
         reasons = self.check(author="overlay-bot[bot]", include_bot_reviews=False)
         self.assertTrue(any("current-head review" in reason for reason in reasons))
 
+    def test_agent_review_replaces_unavailable_bot_reviews_for_human_pr(self):
+        # CodeRabbit holds no review seat in this small repository regardless of
+        # author, and Cubic may refuse bot-authored PRs, so the agent review
+        # must also substitute for a human-authored authorized PR when bot
+        # reviews are unavailable. Without the flag the gate still blocks.
+        with patch.object(
+            gate, "gh", side_effect=fixture(author="TurboCheetah", include_bot_reviews=False)
+        ):
+            self.assertEqual(gate.inspect(102, SHA, agent_reviewed=True)[0], [])
+        reasons = self.check(author="TurboCheetah", include_bot_reviews=False)
+        self.assertTrue(any("current-head review" in reason for reason in reasons))
+
     def test_agent_review_cannot_bypass_safety_gates(self):
         cases: tuple[tuple[dict[str, Any], str], ...] = (
             ({"author": "outside"}, "manual approval"),
