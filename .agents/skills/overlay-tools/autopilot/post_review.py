@@ -93,8 +93,14 @@ def post(token, number, head, body, kind, reply_to=0, dry_run=False):
             if found["body"] == body:
                 result = found
             else:
-                assert_current_head(token, number, head)
-                result = api(token, "PUT", f"{path}/{found['id']}", {"body": body})
+                # GitHub's update-a-review endpoint rejects edits to a
+                # submitted COMMENT review (HTTP 422 in practice; verified
+                # empirically on this PR). Correct a formal review by posting
+                # an updated PR summary instead of trying to rewrite it.
+                raise ValueError(
+                    "review already posted for this head with different body; "
+                    "correct via an updated PR summary"
+                )
         else:
             assert_current_head(token, number, head)
             result = api(token, "POST", path, {"commit_id": head, "event": "COMMENT", "body": body})

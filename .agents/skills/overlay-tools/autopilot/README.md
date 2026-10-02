@@ -69,8 +69,11 @@ Dispatch only on `master` after independently reviewing the exact PR head.
 workflow accepts only owner dispatches on the default branch, validates the
 same-repository PR's authorized author, head/base and reply target, and reads
 back the posted body and App login.
-It updates an existing summary or formal review for the same head instead of
-duplicating it, and validates a reply target even in dry-run mode. It rechecks
+It updates an existing summary for the same head instead of duplicating it,
+and reuses a formal review only when the body is identical — GitHub rejects
+edits to a submitted `COMMENT` review (HTTP 422 in practice), so correcting a
+review means posting an updated PR summary instead. It validates a reply target
+even in dry-run mode. It rechecks
 the PR head before mutation and after read-back; GitHub does not offer an atomic
 compare-and-post for issue comments or replies, so a concurrent force-push may
 still leave a stale comment, which the workflow reports as a failure.

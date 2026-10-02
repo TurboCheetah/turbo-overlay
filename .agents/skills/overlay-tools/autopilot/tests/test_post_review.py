@@ -85,14 +85,16 @@ class PostingTests(unittest.TestCase):
             outcome = post_review.post("token", 7, SHA, body, "review")
         self.assertEqual(outcome["url"], "formal-review-url")
 
-    def test_existing_formal_review_is_updated_not_duplicated(self):
-        body = post_review.review_body(base64.b64encode(b"Corrected review").decode(), SHA)
+    def test_existing_formal_review_is_reused_identical_body(self):
+        body = post_review.review_body(base64.b64encode(b"Review").decode(), SHA)
         old = {
             "id": 789,
-            "body": f"old <!-- lain-review:{SHA} -->",
+            "body": body,
             "user": {"login": post_review.BOT},
+            "commit_id": SHA,
+            "state": "COMMENTED",
+            "html_url": "url",
         }
-        updated = {**old, "body": body, "commit_id": SHA, "state": "COMMENTED", "html_url": "url"}
         calls = []
 
         def fake_api(_token, method, path, payload=None):
@@ -101,16 +103,34 @@ class PostingTests(unittest.TestCase):
                 return PR
             if path.startswith("/pulls/7/reviews?"):
                 return [old]
-            if method == "PUT" and path == "/pulls/7/reviews/789":
-                self.assertEqual(payload, {"body": body})
-                return updated
             if path == "/pulls/7/reviews/789":
-                return updated
+                return old
             raise AssertionError((method, path))
 
         with patch.object(post_review, "api", side_effect=fake_api):
             self.assertEqual(post_review.post("token", 7, SHA, body, "review")["url"], "url")
-        self.assertFalse(any(method == "POST" for method, _, _ in calls))
+        self.assertFalse(any(method in {"POST", "PUT", "PATCH"} for method, _, _ in calls))
+
+    def test_formal_review_body_change_fails_closed(self):
+        body = post_review.review_body(base64.b64encode(b"Corrected review").decode(), SHA)
+        old = {
+            "id": 789,
+            "body": f"old <!-- lain-review:{SHA} -->",
+            "user": {"login": post_review.BOT},
+        }
+
+        def fake_api(_token, method, path, payload=None):
+            if path == "/pulls/7":
+                return PR
+            if path.startswith("/pulls/7/reviews?"):
+                return [old]
+            raise AssertionError((method, path))
+
+        with (
+            patch.object(post_review, "api", side_effect=fake_api),
+            self.assertRaisesRegex(ValueError, "correct via an updated PR summary"),
+        ):
+            post_review.post("token", 7, SHA, body, "review")
 
     def test_existing_summary_is_updated_not_duplicated(self):
         body = post_review.review_body(base64.b64encode(b"new text").decode(), SHA)
