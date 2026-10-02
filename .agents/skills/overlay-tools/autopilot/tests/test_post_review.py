@@ -77,6 +77,33 @@ class PostingTests(unittest.TestCase):
             outcome = post_review.post("token", 7, SHA, body, "review")
         self.assertEqual(outcome["url"], "formal-review-url")
 
+    def test_existing_formal_review_is_updated_not_duplicated(self):
+        body = post_review.review_body(base64.b64encode(b"Corrected review").decode(), SHA)
+        old = {
+            "id": 789,
+            "body": f"old <!-- lain-review:{SHA} -->",
+            "user": {"login": post_review.BOT},
+        }
+        updated = {**old, "body": body, "commit_id": SHA, "state": "COMMENTED", "html_url": "url"}
+        calls = []
+
+        def fake_api(_token, method, path, payload=None):
+            calls.append((method, path, payload))
+            if path == "/pulls/7":
+                return PR
+            if path.startswith("/pulls/7/reviews?"):
+                return [old]
+            if method == "PUT" and path == "/pulls/7/reviews/789":
+                self.assertEqual(payload, {"body": body})
+                return updated
+            if path == "/pulls/7/reviews/789":
+                return updated
+            raise AssertionError((method, path))
+
+        with patch.object(post_review, "api", side_effect=fake_api):
+            self.assertEqual(post_review.post("token", 7, SHA, body, "review")["url"], "url")
+        self.assertFalse(any(method == "POST" for method, _, _ in calls))
+
     def test_existing_summary_is_updated_not_duplicated(self):
         body = post_review.review_body(base64.b64encode(b"new text").decode(), SHA)
         old = {
@@ -135,6 +162,35 @@ class PostingTests(unittest.TestCase):
         with patch.object(post_review, "api", side_effect=fake_api):
             outcome = post_review.post("token", 7, SHA, body, "reply", 123)
         self.assertEqual(outcome["url"], "review-url")
+
+    def test_reply_dry_run_validates_target_without_posting(self):
+        with patch.object(
+            post_review,
+            "api",
+            side_effect=[PR, {"pull_request_url": f"{post_review.API}/pulls/7"}],
+        ) as mocked:
+            result = post_review.post("token", 7, SHA, "body", "reply", 123, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_head_changed_before_mutation_fails_without_post(self):
+        changed = {**PR, "head": {"sha": "b" * 40}}
+        with (
+            patch.object(post_review, "api", side_effect=[PR, [], changed]) as mocked,
+            self.assertRaisesRegex(ValueError, "head/base"),
+        ):
+            post_review.post("token", 7, SHA, "body", "summary")
+        self.assertEqual([call.args[1] for call in mocked.call_args_list], ["GET"] * 3)
+
+    def test_head_changed_after_post_fails_readback(self):
+        changed = {**PR, "head": {"sha": "b" * 40}}
+        body = "review body"
+        created = {"id": 123, "body": body, "user": {"login": post_review.BOT}, "html_url": "url"}
+        with (
+            patch.object(post_review, "api", side_effect=[PR, [], PR, created, created, changed]),
+            self.assertRaisesRegex(ValueError, "head/base"),
+        ):
+            post_review.post("token", 7, SHA, body, "summary")
 
     def test_bad_head_and_unauthorized_base_fail_before_mutation(self):
         with (

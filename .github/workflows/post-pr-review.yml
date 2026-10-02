@@ -39,8 +39,8 @@ concurrency:
 
 jobs:
   post-review:
-    # Only the owner's dispatch on the trusted default branch can use the App key.
-    if: github.actor == 'TurboCheetah' && github.ref == 'refs/heads/master'
+    # Also restrict re-runs: actor remains the original dispatcher on re-run.
+    if: github.actor == 'TurboCheetah' && github.triggering_actor == 'TurboCheetah' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
       - name: Validate App configuration

@@ -54,11 +54,7 @@ def review_body(encoded, head):
     return f"{text}\n\n---\n*Review by Lain, posted via overlay-bot.*\n<!-- lain-review:{head} -->"
 
 
-def post(token, number, head, body, kind, reply_to=0, dry_run=False):
-    if number < 1 or not re.fullmatch(r"[0-9a-f]{40}", head):
-        raise ValueError("invalid PR number or reviewed head SHA")
-    if kind not in {"summary", "reply", "review"} or (kind == "reply") != (reply_to > 0):
-        raise ValueError("reply requires a positive target ID; other kinds must not specify one")
+def assert_current_head(token, number, head):
     pr = api(token, "GET", f"/pulls/{number}")
     if (
         pr["head"]["sha"] != head
@@ -66,7 +62,19 @@ def post(token, number, head, body, kind, reply_to=0, dry_run=False):
         or pr["base"]["repo"]["full_name"] != REPO
     ):
         raise ValueError("PR head/base changed since review")
+
+
+def post(token, number, head, body, kind, reply_to=0, dry_run=False):
+    if number < 1 or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise ValueError("invalid PR number or reviewed head SHA")
+    if kind not in {"summary", "reply", "review"} or (kind == "reply") != (reply_to > 0):
+        raise ValueError("reply requires a positive target ID; other kinds must not specify one")
+    assert_current_head(token, number, head)
     marker = f"<!-- lain-review:{head} -->"
+    if kind == "reply":
+        target = api(token, "GET", f"/pulls/comments/{reply_to}")
+        if target["pull_request_url"] != f"{API}/pulls/{number}":
+            raise ValueError("reply target is not on the requested PR")
     if dry_run:
         return {"dry_run": True, "number": number, "head": head, "kind": kind}
     if kind == "review":
@@ -76,13 +84,17 @@ def post(token, number, head, body, kind, reply_to=0, dry_run=False):
             for r in comment_pages(token, path)
             if (r.get("user") or {}).get("login") == BOT and marker in (r.get("body") or "")
         ]
+        if len(existing) > 1:
+            raise ValueError("multiple bot reviews for this head; manual cleanup required")
         if existing:
-            # A submitted GitHub review cannot be edited. Require a new head
-            # for a materially changed review rather than duplicate it.
-            if len(existing) > 1 or existing[0]["body"] != body:
-                raise ValueError("review already posted for this head with different body")
-            result = existing[0]
+            found = existing[0]
+            if found["body"] == body:
+                result = found
+            else:
+                assert_current_head(token, number, head)
+                result = api(token, "PUT", f"{path}/{found['id']}", {"body": body})
         else:
+            assert_current_head(token, number, head)
             result = api(token, "POST", path, {"commit_id": head, "event": "COMMENT", "body": body})
         verified = api(token, "GET", f"{path}/{result['id']}")
         if verified.get("commit_id") != head or verified.get("state") != "COMMENTED":
@@ -101,14 +113,13 @@ def post(token, number, head, body, kind, reply_to=0, dry_run=False):
             if found["body"] == body:
                 result = found
             else:
+                assert_current_head(token, number, head)
                 result = api(token, "PATCH", f"/issues/comments/{found['id']}", {"body": body})
         else:
+            assert_current_head(token, number, head)
             result = api(token, "POST", path, {"body": body})
         verified = api(token, "GET", f"/issues/comments/{result['id']}")
     else:
-        target = api(token, "GET", f"/pulls/comments/{reply_to}")
-        if target["pull_request_url"] != f"{API}/pulls/{number}":
-            raise ValueError("reply target is not on the requested PR")
         path = f"/pulls/{number}/comments"
         existing = [
             c
@@ -120,12 +131,14 @@ def post(token, number, head, body, kind, reply_to=0, dry_run=False):
         if existing:
             result = existing[0]
         else:
+            assert_current_head(token, number, head)
             result = api(token, "POST", f"{path}/{reply_to}/replies", {"body": body})
         verified = api(token, "GET", f"/pulls/comments/{result['id']}")
         if verified.get("in_reply_to_id") != reply_to:
             raise ValueError("reply read-back target mismatch")
     if verified["body"] != body or (verified.get("user") or {}).get("login") != BOT:
         raise ValueError("comment read-back body or bot author mismatch")
+    assert_current_head(token, number, head)
     return {"number": number, "head": head, "kind": kind, "url": verified["html_url"]}
 
 
