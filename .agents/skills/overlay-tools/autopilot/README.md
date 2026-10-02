@@ -75,7 +75,8 @@ the PR head before mutation and after read-back; GitHub does not offer an atomic
 compare-and-post for issue comments or replies, so a concurrent force-push may
 still leave a stale comment, which the workflow reports as a failure.
 Use `dry_run=true` on the first real dispatch to verify the App token and
-target without posting. After a real dispatch, read the run and comment ID
+target without posting; then dispatch again with `dry_run=false` to actually
+post. After a real dispatch, read the run and comment ID
 before reporting success. A PR for this workflow cannot prove App posting until
 the workflow is merged onto the default branch.
 

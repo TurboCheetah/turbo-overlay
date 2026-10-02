@@ -2,6 +2,7 @@
 
 import base64
 import importlib.util
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -22,7 +23,11 @@ PR = {
 class PostingTests(unittest.TestCase):
     def test_body_validation(self):
         text = base64.b64encode(b"## Finding\n- [x] fixed").decode()
-        self.assertIn("Review by Lain, posted via overlay-bot", post_review.review_body(text, SHA))
+        rendered = post_review.review_body(text, SHA)
+        self.assertIn("Review by Lain, posted via overlay-bot", rendered)
+        # The dedup marker is the key every filter matches on; a regression
+        # that drops it would silently duplicate posts.
+        self.assertIn(f"<!-- lain-review:{SHA} -->", rendered)
         for bad in ("not-base64", base64.b64encode(b"\x00").decode(), ""):
             with self.assertRaises(ValueError):
                 post_review.review_body(bad, SHA)
@@ -166,6 +171,54 @@ class PostingTests(unittest.TestCase):
             outcome = post_review.post("token", 7, SHA, body, "reply", 123)
         self.assertEqual(outcome["url"], "review-url")
 
+    def test_existing_reply_is_reused_not_duplicated(self):
+        body = "## Fix\nApplied <!-- lain-review:" + SHA + " -->"
+        reply = {
+            "id": 456,
+            "body": body,
+            "in_reply_to_id": 123,
+            "user": {"login": post_review.BOT},
+            "html_url": "review-url",
+        }
+
+        def fake_api(_token, method, path, payload=None):
+            if path == "/pulls/7":
+                return PR
+            if path == "/pulls/comments/123":
+                return {"pull_request_url": f"{post_review.API}/pulls/7"}
+            if path.startswith("/pulls/7/comments?"):
+                return [reply]
+            if path == "/pulls/comments/456":
+                return reply
+            raise AssertionError((method, path))
+
+        with patch.object(post_review, "api", side_effect=fake_api):
+            self.assertEqual(
+                post_review.post("token", 7, SHA, body, "reply", 123)["url"], "review-url"
+            )
+
+    def test_duplicate_replies_fail_closed(self):
+        body = "body"
+        dup = [
+            {"id": 1, "body": body, "in_reply_to_id": 123, "user": {"login": post_review.BOT}},
+            {"id": 2, "body": body, "in_reply_to_id": 123, "user": {"login": post_review.BOT}},
+        ]
+
+        def fake_api(_token, method, path, payload=None):
+            if path == "/pulls/7":
+                return PR
+            if path == "/pulls/comments/123":
+                return {"pull_request_url": f"{post_review.API}/pulls/7"}
+            if path.startswith("/pulls/7/comments?"):
+                return dup
+            raise AssertionError((method, path))
+
+        with (
+            patch.object(post_review, "api", side_effect=fake_api),
+            self.assertRaisesRegex(ValueError, "manual cleanup"),
+        ):
+            post_review.post("token", 7, SHA, body, "reply", 123)
+
     def test_reply_dry_run_validates_target_without_posting(self):
         with patch.object(
             post_review,
@@ -242,6 +295,55 @@ class PostingTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "author mismatch"),
         ):
             post_review.post("token", 7, SHA, body, "summary")
+
+    def test_invalid_head_sha_fails_before_api(self):
+        with (
+            patch.object(post_review, "api") as mocked,
+            self.assertRaisesRegex(ValueError, "invalid PR number"),
+        ):
+            post_review.post("token", 7, "g" * 40, "body", "summary")
+        mocked.assert_not_called()
+
+    def test_main_dry_run_success_path(self):
+        env = {
+            "GITHUB_REPOSITORY": post_review.REPO,
+            "GH_TOKEN": "token",
+            "HEAD_SHA": SHA,
+            "PR_NUMBER": "7",
+            "BODY_B64": base64.b64encode(b"## Summary").decode(),
+            "REVIEW_KIND": "summary",
+            "DRY_RUN": "true",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(
+                post_review, "post", return_value={"dry_run": True, "kind": "summary"}
+            ) as posted,
+        ):
+            self.assertEqual(post_review.main(), 0)
+        posted.assert_called_once()
+        args = posted.call_args.args
+        self.assertEqual(args[1], 7)  # PR number parsed from env
+        self.assertEqual(args[2], SHA)
+        self.assertIn("overlay-bot", args[3])  # body rendered with footer
+        self.assertEqual(args[4], "summary")
+        self.assertTrue(args[6])  # dry_run honored
+
+    def test_main_rejects_wrong_repository(self):
+        with (
+            patch.dict(os.environ, {"GITHUB_REPOSITORY": "other/repo"}, clear=False),
+            patch.object(post_review, "post") as posted,
+        ):
+            self.assertEqual(post_review.main(), 1)
+        posted.assert_not_called()
+
+    def test_main_missing_env_fails(self):
+        with (
+            patch.dict(os.environ, {"GITHUB_REPOSITORY": post_review.REPO}, clear=False),
+            patch.object(post_review, "post") as posted,
+        ):
+            self.assertEqual(post_review.main(), 1)
+        posted.assert_not_called()
 
     def test_workflow_grants_app_issues_permission(self):
         """kind=summary posts through the Issues Comments API, which requires

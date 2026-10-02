@@ -130,6 +130,8 @@ def post(token, number, head, body, kind, reply_to=0, dry_run=False):
             and c.get("in_reply_to_id") == reply_to
             and c.get("body") == body
         ]
+        if len(existing) > 1:
+            raise ValueError("multiple bot replies for this thread; manual cleanup required")
         if existing:
             result = existing[0]
         else:
