@@ -8,6 +8,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,7 @@ def fixture(
     rabbit_coverage=None,
     rabbit_comment_updated=None,
     rabbit_coverage_login="coderabbitai[bot]",
+    include_bot_reviews=True,
 ):
     calls = {"pulls": 0}
     if cubic_runs is None:
@@ -130,7 +132,7 @@ def fixture(
             {"user": user, "commit_id": commit, "state": state, "body": ""}
             for user, commit, state in human_reviews
         ]
-        + reviews
+        + (reviews if include_bot_reviews else [])
         + list(trailing_reviews)
     )
     comments = [
@@ -203,6 +205,46 @@ class MergeGateTests(unittest.TestCase):
 
     def test_green_authorized_head(self):
         self.assertEqual(self.check(), [])
+
+    def test_agent_review_replaces_unavailable_bot_reviews(self):
+        with patch.object(
+            gate, "gh", side_effect=fixture(author="overlay-bot[bot]", include_bot_reviews=False)
+        ):
+            self.assertEqual(gate.inspect(102, SHA, agent_reviewed=True)[0], [])
+        reasons = self.check(author="overlay-bot[bot]", include_bot_reviews=False)
+        self.assertTrue(any("current-head review" in reason for reason in reasons))
+
+    def test_agent_review_replaces_unavailable_bot_reviews_for_human_pr(self):
+        # CodeRabbit holds no review seat in this small repository regardless of
+        # author, and Cubic may refuse bot-authored PRs, so the agent review
+        # must also substitute for a human-authored authorized PR when bot
+        # reviews are unavailable. Without the flag the gate still blocks.
+        with patch.object(
+            gate, "gh", side_effect=fixture(author="TurboCheetah", include_bot_reviews=False)
+        ):
+            self.assertEqual(gate.inspect(102, SHA, agent_reviewed=True)[0], [])
+        reasons = self.check(author="TurboCheetah", include_bot_reviews=False)
+        self.assertTrue(any("current-head review" in reason for reason in reasons))
+
+    def test_agent_review_cannot_bypass_safety_gates(self):
+        cases: tuple[tuple[dict[str, Any], str], ...] = (
+            ({"author": "outside"}, "manual approval"),
+            ({"head_repo": "outside/fork"}, "manual approval"),
+            ({"failed_check": True}, "check not successful"),
+            ({"no_repo_workflow": True}, "repository CI"),
+            ({"unresolved": True}, "unresolved"),
+            ({"review_decision": "CHANGES_REQUESTED"}, "review gate"),
+        )
+        for changes, expected in cases:
+            with self.subTest(changes=changes):
+                with patch.object(gate, "gh", side_effect=fixture(**changes)):
+                    reasons, _ = gate.inspect(102, SHA, agent_reviewed=True)
+                self.assertTrue(any(expected in reason for reason in reasons), reasons)
+
+    def test_agent_review_stale_head_blocks(self):
+        with patch.object(gate, "gh", side_effect=fixture()):
+            reasons, _ = gate.inspect(102, OLD_SHA, agent_reviewed=True)
+        self.assertTrue(any("head changed" in reason for reason in reasons))
 
     def test_clean_cubic_check_covers_followup_commit(self):
         self.assertEqual(self.check(cubic_review_head=OLD_SHA), [])
@@ -541,6 +583,19 @@ class MergeGateTests(unittest.TestCase):
         ):
             self.assertEqual(gate.main(), 0)
         self.assertEqual(inspected.call_count, 2)
+        command.assert_called_once()
+
+    def test_agent_review_assertion_applies_to_both_merge_inspections(self):
+        merged = {"merged": True, "head": {"sha": SHA}, "html_url": "https://example.invalid"}
+        with (
+            patch.object(gate, "inspect", return_value=([], SHA)) as inspected,
+            patch.object(gate, "gh", return_value=merged),
+            patch.object(gate.subprocess, "run") as command,
+            patch.object(sys, "argv", ["gate", "102", SHA, "--agent-reviewed", "--merge"]),
+        ):
+            self.assertEqual(gate.main(), 0)
+        self.assertEqual(inspected.call_count, 2)
+        inspected.assert_any_call(102, SHA, agent_reviewed=True)
         command.assert_called_once()
 
     def test_merge_recheck_blocking_reason_aborts_merge(self):
