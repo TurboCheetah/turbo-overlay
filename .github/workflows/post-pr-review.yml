@@ -61,12 +61,11 @@ jobs:
           client-id: ${{ vars.UPDATE_BOT_APP_ID }}
           private-key: ${{ secrets.UPDATE_BOT_PRIVATE_KEY }}
           permission-metadata: read
+          # GitHub accepts Pull requests:write for comments on a PR via the
+          # Issues Comments API. Request only permissions this App has: an
+          # ungranted Issues:write scope makes token creation fail (run
+          # 37073241992), even for a dry run.
           permission-pull-requests: write
-          # PR-level summaries post through the Issues Comments API and need
-          # the Issues scope; formal reviews and thread replies need
-          # pull-requests. Without issues:write the first real kind=summary
-          # dispatch 403s (a dry run cannot reveal it).
-          permission-issues: write
 
       - name: Checkout trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

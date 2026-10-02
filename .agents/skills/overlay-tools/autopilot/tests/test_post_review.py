@@ -365,12 +365,13 @@ class PostingTests(unittest.TestCase):
             self.assertEqual(post_review.main(), 1)
         posted.assert_not_called()
 
-    def test_workflow_grants_app_issues_permission(self):
-        """kind=summary posts through the Issues Comments API, which requires
-        the App's issues scope; a dry run cannot reveal a missing scope, so
-        the workflow must ship issues:write from the start."""
+    def test_workflow_requests_only_installed_app_permissions(self):
+        """GitHub accepts pull-requests:write for PR issue comments; requesting
+        unavailable issues:write makes token creation fail before the dry run."""
         workflow = Path(__file__).resolve().parents[5] / ".github/workflows/post-pr-review.yml"
-        self.assertIn("permission-issues: write", workflow.read_text())
+        content = workflow.read_text()
+        self.assertIn("permission-pull-requests: write", content)
+        self.assertNotIn("permission-issues:", content)
 
 
 if __name__ == "__main__":
