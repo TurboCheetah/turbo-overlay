@@ -46,6 +46,43 @@ outside Git; this PR does not change them.
    `gh pr merge --squash --match-head-commit` without an admin override and
    reads the PR back.
 
+## Review comments as overlay-bot
+
+Confirmed findings and their fixes belong on the PR, not only in Telegram.
+Reply to the bot's original review thread for a line-specific finding and
+publish one Markdown PR-level summary after fixes, including impact, resolution,
+reviewed SHA and actual verification. See the adjacent skill for formatting and
+deduplication rules.
+
+The separate [Post PR review as overlay-bot](../../../../.github/workflows/post-pr-review.yml)
+workflow uses the same GitHub App as Check Updates, but mints a short-lived token
+**inside Actions**. The App private key stays in the existing Actions secret;
+the local review worker only dispatches the workflow using the owner's `gh`
+authentication. This posts a formal non-approving `COMMENT` review (`kind=review`), a PR issue
+comment (`kind=summary`), or a reply to an existing review comment
+(`kind=reply`, `reply_to=COMMENT_ID`) as `overlay-bot[bot]`. It never approves
+the PR. Its footer
+names Lain as the reviewer so posting identity is not misrepresented.
+
+Dispatch only on `master` after independently reviewing the exact PR head.
+`body_b64` is base64-encoded UTF-8 Markdown (at most 24 KB decoded). The
+workflow accepts only owner dispatches on the default branch, validates the
+same-repository PR's authorized author, head/base and reply target, and reads
+back the posted body and App login.
+It updates an existing summary for the same head instead of duplicating it,
+and reuses a formal review only when the body is identical — GitHub rejects
+edits to a submitted `COMMENT` review (HTTP 422 in practice), so correcting a
+review means posting an updated PR summary instead. It validates a reply target
+even in dry-run mode. It rechecks
+the PR head before mutation and after read-back; GitHub does not offer an atomic
+compare-and-post for issue comments or replies, so a concurrent force-push may
+still leave a stale comment, which the workflow reports as a failure.
+Use `dry_run=true` on the first real dispatch to verify the App token and
+target without posting; then dispatch again with `dry_run=false` to actually
+post. After a real dispatch, read the run and comment ID
+before reporting success. A PR for this workflow cannot prove App posting until
+the workflow is merged onto the default branch.
+
 ## Deployment
 
 The scripts require Python 3.11+ and an authenticated `gh` CLI. To update the

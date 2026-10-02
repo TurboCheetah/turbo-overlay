@@ -1,0 +1,85 @@
+name: Post PR review as overlay-bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number in TurboCheetah/turbo-overlay"
+        required: true
+        type: string
+      head_sha:
+        description: "Exact reviewed 40-character head SHA"
+        required: true
+        type: string
+      body_b64:
+        description: "Base64-encoded UTF-8 Markdown review body (max 24 KB decoded)"
+        required: true
+        type: string
+      kind:
+        description: "Formal COMMENT review, PR summary comment, or thread reply"
+        required: true
+        type: choice
+        options: [review, summary, reply]
+      reply_to:
+        description: "Review comment ID for kind=reply (omit for summary)"
+        required: false
+        type: string
+      dry_run:
+        description: "Validate without posting a comment"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: overlay-bot-review-${{ github.actor }}-${{ github.triggering_actor }}-${{ inputs.pr_number }}-${{ inputs.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  post-review:
+    # Also restrict re-runs: actor remains the original dispatcher on re-run.
+    if: github.actor == 'TurboCheetah' && github.triggering_actor == 'TurboCheetah' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate App configuration
+        env:
+          UPDATE_BOT_APP_ID: ${{ vars.UPDATE_BOT_APP_ID }}
+          UPDATE_BOT_PRIVATE_KEY: ${{ secrets.UPDATE_BOT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_BOT_APP_ID" && test -n "$UPDATE_BOT_PRIVATE_KEY" || {
+            echo '::error::Missing update bot App variable or secret'
+            exit 1
+          }
+
+      - name: Create short-lived App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.UPDATE_BOT_APP_ID }}
+          private-key: ${{ secrets.UPDATE_BOT_PRIVATE_KEY }}
+          permission-metadata: read
+          permission-pull-requests: write
+          # PR-level summaries post through the Issues Comments API and need
+          # the Issues scope; formal reviews and thread replies need
+          # pull-requests. Without issues:write the first real kind=summary
+          # dispatch 403s (a dry run cannot reveal it).
+          permission-issues: write
+
+      - name: Checkout trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate and post review
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          BODY_B64: ${{ inputs.body_b64 }}
+          REVIEW_KIND: ${{ inputs.kind }}
+          REPLY_TO: ${{ inputs.reply_to }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python3 .agents/skills/overlay-tools/autopilot/post_review.py
