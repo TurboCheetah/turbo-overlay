@@ -62,6 +62,11 @@ jobs:
           private-key: ${{ secrets.UPDATE_BOT_PRIVATE_KEY }}
           permission-metadata: read
           permission-pull-requests: write
+          # PR-level summaries post through the Issues Comments API and need
+          # the Issues scope; formal reviews and thread replies need
+          # pull-requests. Without issues:write the first real kind=summary
+          # dispatch 403s (a dry run cannot reveal it).
+          permission-issues: write
 
       - name: Checkout trusted default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

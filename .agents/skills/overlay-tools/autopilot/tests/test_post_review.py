@@ -243,6 +243,13 @@ class PostingTests(unittest.TestCase):
         ):
             post_review.post("token", 7, SHA, body, "summary")
 
+    def test_workflow_grants_app_issues_permission(self):
+        """kind=summary posts through the Issues Comments API, which requires
+        the App's issues scope; a dry run cannot reveal a missing scope, so
+        the workflow must ship issues:write from the start."""
+        workflow = Path(__file__).resolve().parents[5] / ".github/workflows/post-pr-review.yml"
+        self.assertIn("permission-issues: write", workflow.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
