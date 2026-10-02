@@ -123,7 +123,7 @@ def coderabbit_comment_coverage(number, head, comments, review):
     return review.get("commit_id") in {c["sha"] for c in commits}
 
 
-def inspect(number, expected_head):
+def inspect(number, expected_head, *, agent_reviewed=False):
     pr = gh("api", f"repos/{REPO}/pulls/{number}")
     reasons = []
     if pr["base"]["ref"] != "master" or pr["base"]["repo"]["full_name"] != REPO:
@@ -195,7 +195,9 @@ def inspect(number, expected_head):
     comments = flatten_pages(
         gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
     )
-    for bot in sorted(BOTS):
+    # The agent's own review can replace bot reviews that are unavailable for
+    # bot-authored PRs. All GitHub, CI, authorization and thread gates remain.
+    for bot in sorted(BOTS) if not agent_reviewed else ():
         review = latest.get(bot)
         if not review or review["state"] not in {"APPROVED", "COMMENTED"}:
             reasons.append(f"{bot} has not completed a substantive current-head review")
@@ -220,7 +222,8 @@ def inspect(number, expected_head):
     for comment in comments:
         user = ((comment.get("user") or {}).get("login") or "").lower().removesuffix("[bot]")
         if (
-            user == "coderabbitai"
+            not agent_reviewed
+            and user == "coderabbitai"
             and rabbit
             and comment["updated_at"] >= rabbit["submitted_at"]
             and RABBIT_RATE_LIMIT.search(comment.get("body") or "")
@@ -254,13 +257,18 @@ def main():
     parser.add_argument("number", type=int)
     parser.add_argument("expected_head", help="full, reviewed 40-character head SHA")
     parser.add_argument(
+        "--agent-reviewed",
+        action="store_true",
+        help="assert independent review of this exact head; bot reviews become advisory",
+    )
+    parser.add_argument(
         "--merge", action="store_true", help="squash merge only if every gate passes"
     )
     args = parser.parse_args()
     if args.number < 1 or not re.fullmatch(r"[0-9a-f]{40}", args.expected_head):
         parser.error("invalid PR number or head SHA")
     try:
-        reasons, head = inspect(args.number, args.expected_head)
+        reasons, head = inspect(args.number, args.expected_head, agent_reviewed=args.agent_reviewed)
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"BLOCKED: could not verify every gate: {exc}")
         return 1
@@ -281,7 +289,7 @@ def main():
     # every gate immediately before merging so a same-head review change
     # cannot be merged unnoticed.
     try:
-        reasons, head = inspect(args.number, args.expected_head)
+        reasons, head = inspect(args.number, args.expected_head, agent_reviewed=args.agent_reviewed)
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"BLOCKED: could not verify every gate before merge: {exc}")
         return 1

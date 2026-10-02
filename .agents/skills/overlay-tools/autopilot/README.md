@@ -22,10 +22,13 @@ outside Git; this PR does not change them.
    branches it may commit and push fixes. External forks get a read-only review
    and require manual merge approval. Follow the adjacent
    [autopilot skill](../../turbo-overlay-pr-autopilot/SKILL.md).
-4. Before any autonomous merge, call `turbo_overlay_pr_autopilot_gate.py` with
-   the full reviewed head SHA. The gate rejects unauthorized heads, changed
-   commits, non-green checks, missing current-head CodeRabbit/Cubic reviews,
+4. Before any autonomous merge, independently review the exact head and record
+   the evidence, then call `turbo_overlay_pr_autopilot_gate.py` with the full
+   reviewed head SHA and `--agent-reviewed`. Bot reviews are additional evidence;
+   their lack of a review seat or paid plan must not veto a sound agent review.
+   The gate still rejects unauthorized heads, changed commits, non-green checks,
    standing change requests, unresolved threads, and GitHub merge conflicts.
+   Without `--agent-reviewed`, substantive current-head bot reviews are required.
    Cubic posts no review for a clean follow-up commit, so its successful
    check run on the exact head counts when it reports "0 issues found" and
    its last review covered an earlier commit of the PR. CodeRabbit likewise
@@ -34,7 +37,8 @@ outside Git; this PR does not change them.
    `final_review_risk_coverage` marker for the exact head, and that marker
    counts when it names the current head, the comment was updated after the
    older review, and that review covered an earlier commit of the PR. Empty
-   bot thread-reply reviews are ignored. The `--merge` mode uses
+   bot thread-reply reviews are ignored. The `--merge` mode rechecks every gate,
+   then uses
    `gh pr merge --squash --match-head-commit` without an admin override and
    reads the PR back.
 
