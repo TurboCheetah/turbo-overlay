@@ -45,7 +45,7 @@ def comment_pages(token, path):
 
 def review_body(encoded, head):
     try:
-        raw = base64.b64decode(encoded, validate=True)
+        raw = base64.b64decode("".join(encoded.split()), validate=True)
         text = raw.decode("utf-8").strip()
     except (binascii.Error, UnicodeError) as exc:
         raise ValueError("body must be base64-encoded UTF-8") from exc
@@ -60,6 +60,8 @@ def assert_current_head(token, number, head):
         pr["head"]["sha"] != head
         or pr["base"]["ref"] != "master"
         or pr["base"]["repo"]["full_name"] != REPO
+        or (pr["head"].get("repo") or {}).get("full_name") != REPO
+        or (pr.get("user") or {}).get("login") not in {"TurboCheetah", BOT}
     ):
         raise ValueError("PR head/base changed since review")
 

@@ -34,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: overlay-bot-review-${{ inputs.pr_number }}-${{ inputs.head_sha }}
+  group: overlay-bot-review-${{ github.actor }}-${{ github.triggering_actor }}-${{ inputs.pr_number }}-${{ inputs.head_sha }}
   cancel-in-progress: false
 
 jobs:

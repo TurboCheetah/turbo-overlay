@@ -13,8 +13,9 @@ post_review = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(post_review)
 SHA = "a" * 40
 PR = {
-    "head": {"sha": SHA},
+    "head": {"sha": SHA, "repo": {"full_name": post_review.REPO}},
     "base": {"ref": "master", "repo": {"full_name": post_review.REPO}},
+    "user": {"login": "TurboCheetah"},
 }
 
 
@@ -27,6 +28,8 @@ class PostingTests(unittest.TestCase):
                 post_review.review_body(bad, SHA)
         with self.assertRaises(ValueError):
             post_review.review_body(base64.b64encode(b"a" * 24_001).decode(), SHA)
+        wrapped = base64.b64encode(b"## Finding\n- [x] fixed").decode()
+        self.assertIn("## Finding", post_review.review_body(wrapped[:8] + "\n" + wrapped[8:], SHA))
 
     def test_summary_posts_and_verifies_exact_bot_author(self):
         body = post_review.review_body(base64.b64encode(b"## Finding").decode(), SHA)
@@ -205,6 +208,17 @@ class PostingTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "head/base"),
         ):
             post_review.post("token", 7, SHA, "body", "summary")
+
+    def test_external_or_unauthorized_pr_fails_before_mutation(self):
+        external = {**PR, "head": {"sha": SHA, "repo": {"full_name": "someone/fork"}}}
+        other_author = {**PR, "user": {"login": "someone-else"}}
+        for item in (external, other_author):
+            with (
+                patch.object(post_review, "api", return_value=item) as mocked,
+                self.assertRaisesRegex(ValueError, "head/base"),
+            ):
+                post_review.post("token", 7, SHA, "body", "summary")
+            mocked.assert_called_once_with("token", "GET", "/pulls/7")
 
     def test_dry_run_checks_pr_but_does_not_post(self):
         with patch.object(post_review, "api", return_value=PR) as mocked:

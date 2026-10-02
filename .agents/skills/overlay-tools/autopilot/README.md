@@ -67,7 +67,8 @@ names Lain as the reviewer so posting identity is not misrepresented.
 Dispatch only on `master` after independently reviewing the exact PR head.
 `body_b64` is base64-encoded UTF-8 Markdown (at most 24 KB decoded). The
 workflow accepts only owner dispatches on the default branch, validates the
-PR head/base and reply target, and reads back the posted body and App login.
+same-repository PR's authorized author, head/base and reply target, and reads
+back the posted body and App login.
 It updates an existing summary or formal review for the same head instead of
 duplicating it, and validates a reply target even in dry-run mode. It rechecks
 the PR head before mutation and after read-back; GitHub does not offer an atomic
