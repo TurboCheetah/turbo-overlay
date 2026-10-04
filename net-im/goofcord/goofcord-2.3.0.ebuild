@@ -65,6 +65,7 @@ src_unpack() {
 }
 
 src_prepare() {
+	default
 	pushd "opt/GoofCord/locales" >/dev/null || die
 	chromium_remove_language_paks
 	popd >/dev/null || die
@@ -81,15 +82,29 @@ src_install() {
 
 	fperms 0755 \
 		"${DESTDIR}/goofcord" \
-		"${DESTDIR}/chrome_crashpad_handler" \
-		"${DESTDIR}/resources/goofbind" \
-		"${DESTDIR}/resources/patchcord"
+		"${DESTDIR}/chrome_crashpad_handler"
+
+	# Payload files absent in some releases (2.2.2 lacks goofbind;
+	# 2.3.1+ adds goofcord-launcher).
+	if [[ -f "${DESTDIR}/resources/goofbind" ]]; then
+		fperms 0755 "${DESTDIR}/resources/goofbind"
+	fi
+	if [[ -f "${DESTDIR}/resources/patchcord" ]]; then
+		fperms 0755 "${DESTDIR}/resources/patchcord"
+	fi
+	if [[ -f "${DESTDIR}/goofcord-launcher" ]]; then
+		fperms 0755 "${DESTDIR}/goofcord-launcher"
+	fi
 
 	# Match GURU vesktop-bin / gentoo discord: setuid sandbox via 4711.
 	fowners root "${DESTDIR}/chrome-sandbox"
 	fperms 4711 "${DESTDIR}/chrome-sandbox"
 
-	domenu "${WORKDIR}/usr/share/applications/goofcord.desktop" || die
+	local desktop="goofcord.desktop"
+	if [[ -f "${WORKDIR}/usr/share/applications/io.github.milkshiift.GoofCord.desktop" ]]; then
+		desktop="io.github.milkshiift.GoofCord.desktop"
+	fi
+	domenu "${WORKDIR}/usr/share/applications/${desktop}" || die
 	insinto /usr/share/icons/hicolor
 	doins -r usr/share/icons/hicolor/*
 }
