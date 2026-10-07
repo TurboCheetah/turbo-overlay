@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Locally versioned OpenRC adapter for T3 Code protocol-3 service
+		runtimes. Portage owns the adapter, not the upstream application or
+		its user-owned runtime, service state, logs or database.
+	</longdescription>
+	<use>
+		<flag name="tailscale">Install dependencies for optional root-managed Tailscale Serve.</flag>
+	</use>
+</pkgmetadata>

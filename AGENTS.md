@@ -90,6 +90,12 @@ Located at `.agents/skills/overlay-tools/`. Requires [uv](https://github.com/ast
 Installs build dependencies, then runs fetch/Manifest validation and
 unpack→install; it does not install runtime dependencies or run the app. Only use it on trusted ebuilds.
 
+### T3 Code update ownership
+
+T3 desktop packages are deprecated. Respect `metadata/update-exclusions.json`
+before checking or bumping versions. Portage owns the OpenRC adapter only;
+upstream manages the per-user runtime.
+
 ### Automated Updates (GitHub Actions)
 
 The workflow at `.github/workflows/check-updates.yml` runs on two schedules: daily (06:37 UTC) for nightly-channel packages (`check-updates --channel nightly`) and weekly on Sunday (07:07 UTC) for every other channel (`--exclude-channel nightly`). A manual dispatch checks all packages unless the `channel` / `exclude_channel` inputs are supplied.

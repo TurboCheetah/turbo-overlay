@@ -1,0 +1,100 @@
+#!/bin/sh
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+fail() {
+	printf 't3code-openrc: %s\n' "$*" >&2
+	exit 1
+}
+
+[ -n "${T3CODE_HOME:-}" ] || fail 'T3CODE_HOME is required'
+case ${T3CODE_HOME} in
+	/*) ;;
+	*) fail 'T3CODE_HOME must be absolute' ;;
+esac
+state=${T3CODE_HOME}/runtime/service-state.json
+# Match upstream's exact SemVer grammar, not tags, ranges or path components.
+semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+exact_version() {
+	printf '%s' "$1" | jq -Rse --arg pattern "${semver}" \
+		'test($pattern) and (contains("\n") | not)' >/dev/null 2>&1 ||
+		fail 'version must be exact SemVer'
+}
+complete_runtime() {
+	exact_version "${version}"
+	binary=${T3CODE_HOME}/runtime/versions/${version}/t3
+	sentinel=${T3CODE_HOME}/runtime/versions/${version}/.install-complete
+	[ -f "${binary}" ] && [ -x "${binary}" ] || fail 'runtime executable missing or not executable'
+	[ -f "${sentinel}" ] && [ "$(cat "${sentinel}")" = "${version}" ] ||
+		fail 'runtime is incomplete: sentinel must match version'
+}
+check() {
+	# jq -s on a FIFO would block forever and hang OpenRC's preflight.
+	[ -f "${state}" ] || fail 'state must be a regular file'
+	jq -se 'length == 1 and (.[0] | type == "object" and .protocol == 3)' \
+		"${state}" >/dev/null 2>&1 || fail 'state must be valid protocol 3 JSON'
+	version=$(jq -er --arg pattern "${semver}" \
+		'.activeVersion | select(type == "string") |
+			select(test($pattern) and (contains("\n") | not))' "${state}") ||
+		fail 'state activeVersion must be an exact version'
+	complete_runtime
+}
+nonroot() {
+	uid=$(id -u) || fail 'cannot determine uid; refusing to run'
+	case ${uid} in
+		0) fail 'refusing to run as root' ;;
+		''|*[!0-9]*) fail 'invalid uid; refusing to run' ;;
+	esac
+}
+service_environment() {
+	case ${HOME:-} in /*) ;; *) fail 'an absolute user HOME is required' ;; esac
+	T3CODE_HOST=127.0.0.1
+	T3CODE_PORT=${T3CODE_PORT:-3773}
+	case ${T3CODE_PORT} in ''|*[!0-9]*) fail 'invalid server port' ;; esac
+	[ "${T3CODE_PORT}" -gt 0 ] && [ "${T3CODE_PORT}" -le 65535 ] || fail 'invalid server port'
+	T3CODE_MODE=web
+	T3CODE_NO_BROWSER=true
+	T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=false
+	T3CODE_TAILSCALE_SERVE=false
+	PATH=${HOME}/.local/bin:${T3CODE_HELPER_PATH:-/usr/local/bin:/usr/bin:/bin}
+	export HOME PATH T3CODE_HOME T3CODE_HOST T3CODE_PORT T3CODE_MODE T3CODE_NO_BROWSER
+	export T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD T3CODE_TAILSCALE_SERVE
+	unset VITE_DEV_SERVER_URL T3CODE_BOOTSTRAP_FD T3_SERVICE_LAUNCHER_CONTEXT
+}
+case ${1:-} in
+	check)
+		[ "$#" -eq 1 ] || fail 'check takes no arguments'
+		check
+		printf '%s\n' "${version}"
+		;;
+	run)
+		[ "$#" -eq 1 ] || fail 'run takes no arguments'
+		nonroot
+		service_environment
+		check
+		cd "${HOME}" || fail 'cannot enter user HOME'
+		umask 077
+		mkdir -p "${T3CODE_HOME}/userdata/logs" || fail 'cannot create user logs'
+		exec >>"${T3CODE_HOME}/userdata/logs/openrc.log" 2>&1
+		exec "${binary}" __service-launcher
+		;;
+	initialize)
+		nonroot
+		[ "$#" -eq 2 ] || fail 'initialize requires EXACT_VERSION'
+		[ ! -e "${state}" ] && [ ! -L "${state}" ] || fail 'refusing existing state'
+		version=$2
+		complete_runtime
+		umask 077
+		temporary=$(mktemp "${T3CODE_HOME}/runtime/.openrc-state.XXXXXXXXXX") ||
+			fail 'cannot create private state staging file'
+		trap 'rm -f -- "${temporary}"' 0
+		trap 'exit 1' HUP INT TERM
+		jq -n --arg version "${version}" '{protocol: 3, activeVersion: $version}' \
+			>"${temporary}" || fail 'cannot write state'
+		# Hard-link publication is atomic and no-clobber, even if a competing
+		# initializer creates a file, directory or dangling symlink meanwhile.
+		ln -T -- "${temporary}" "${state}" || fail 'refusing existing state or publication failed'
+		printf 'initialized %s\n' "${version}"
+		;;
+	*) fail 'usage: t3code-openrc check | run | initialize EXACT_VERSION' ;;
+esac

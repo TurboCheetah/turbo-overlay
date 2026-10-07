@@ -21,6 +21,20 @@ Maintenance tools for turbo-overlay Gentoo packages.
 
 Scan packages for available upstream updates.
 
+Read `metadata/update-exclusions.json` as the repository's explicit maintenance
+policy. Both retired T3 desktop atoms and `dev-util/t3code-openrc` are excluded.
+The OpenRC adapter is locally versioned, not bumped from upstream runtime
+releases. `check-updates` omits excluded packages before channel selection or
+upstream lookups and prints each atom and reason on stderr, even with `--json`.
+This applies to full scans and explicit `--package` targets. A scan with no
+eligible updates exits `2`. Daily and weekly workflow schedules remain unchanged.
+
+Policy keys must be exact unversioned `category/package` atoms and values must
+be non-empty reason strings. Missing policy means no exclusions. Malformed
+JSON, types, atoms, duplicate keys, or reasons fail closed with exit `1` before
+network access or writes. Do not infer exclusions from `profiles/package.mask`;
+Portage selection and maintenance automation are separate policies.
+
 ```bash
 # Check all packages
 .agents/skills/overlay-tools/bin/check-updates
@@ -64,6 +78,14 @@ matches no package warns on stderr and exits `2`.
 ### update-ebuild
 
 Bump ebuild versions with optional PR automation.
+
+`update-ebuild` refuses policy-excluded packages with exit `1` and their reason
+before any writes, fetches, branching, commits, or pushes. `--dry-run`, `--pr`,
+`--yes`, and `--skip-git` do not override the policy. See
+[`README.md`](README.md#repository-update-policy) for the schema and
+[the overlay migration guide](../../../README.md#t3-code-desktop-and-openrc)
+for desktop migration and adapter ownership. Retain the deprecated desktop
+ebuilds and Manifests; do not automatically uninstall existing packages.
 
 ```bash
 # Version bump
