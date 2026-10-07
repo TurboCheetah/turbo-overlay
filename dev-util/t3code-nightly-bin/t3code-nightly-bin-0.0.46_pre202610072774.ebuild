@@ -5,7 +5,7 @@ EAPI=8
 
 # Raw upstream nightly tag, e.g. 0.0.37-nightly.20260830.1227.
 # PV is the Gentoo-form date+time snapshot (0.0.37_preYYYYMMDDHHMM).
-MY_PV="0.0.46-nightly.20261004.2648"
+MY_PV="0.0.46-nightly.20261007.2774"
 APPIMAGE_NAME="T3-Code-${MY_PV}-x86_64.AppImage"
 
 inherit desktop xdg
