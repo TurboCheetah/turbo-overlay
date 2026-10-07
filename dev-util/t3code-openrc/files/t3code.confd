@@ -1,0 +1,23 @@
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+# shellcheck shell=sh disable=SC2034
+
+# REQUIRED: existing non-root account and its absolute T3 home.
+# HOME is read from this account's passwd entry, not the administrator's shell.
+t3code_user=""
+t3code_home=""
+
+# The adapter always binds 127.0.0.1. No browser or working-directory bootstrap.
+t3code_port="3773"
+# The user's $HOME/.local/bin is prepended by the unprivileged run helper.
+t3code_helper_path="/usr/local/bin:/usr/bin:/bin"
+
+# Optional: requires the package's tailscale USE flag and a running tailscaled.
+# OpenRC alone owns this mapping. T3's internal Tailscale Serve stays disabled.
+t3code_tailscale="false"
+# REQUIRED if enabled: a dedicated, otherwise unused HTTPS port and an explicit
+# target exactly matching http://127.0.0.1:<t3code_port>. No implied proxy target.
+t3code_tailscale_https_port=""
+t3code_tailscale_target=""
+# Readiness attempts, 1..60, with one second between attempts.
+t3code_proxy_retries="10"

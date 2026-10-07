@@ -1,0 +1,5 @@
+{
+  "dev-util/t3code-bin": "Desktop package deprecated; use upstream desktop installers. See README.md#t3-code-desktop-and-openrc.",
+  "dev-util/t3code-nightly-bin": "Desktop package deprecated; use upstream desktop installers. See README.md#t3-code-desktop-and-openrc.",
+  "dev-util/t3code-openrc": "Locally versioned OpenRC adapter; upstream runtime releases and nightly tags do not bump this package."
+}

@@ -34,8 +34,14 @@ from overlay_tools.core.git_utils import (
     is_git_repo,
 )
 from overlay_tools.core.logging import Logger, set_logger
-from overlay_tools.core.overlay import metadata_cache_path, read_repo_name, select_ebuilds_to_drop
+from overlay_tools.core.overlay import (
+    find_overlay_root,
+    metadata_cache_path,
+    read_repo_name,
+    select_ebuilds_to_drop,
+)
 from overlay_tools.core.subprocess_utils import run_ebuild_manifest, run_egencache_update
+from overlay_tools.core.update_policy import load_update_exclusions
 from overlay_tools.core.versions import normalize_gentoo_version
 
 
@@ -199,6 +205,12 @@ def build_context(args: argparse.Namespace, normalized_version: str) -> UpdateCo
     pkg_path = Path(args.package_path).resolve()
     if not pkg_path.is_dir():
         raise ValueError(f"Not a directory: {pkg_path}")
+
+    policy_root = find_overlay_root(pkg_path) or pkg_path.parent.parent
+    exclusions = load_update_exclusions(policy_root)
+    atom = f"{pkg_path.parent.name}/{pkg_path.name}"
+    if atom in exclusions:
+        raise ValueError(f"Update excluded for {atom}: {exclusions[atom]}")
 
     ebuilds = find_ebuilds(pkg_path)
     if not ebuilds:
@@ -677,7 +689,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         context = build_context(args, normalized_version)
-    except (ValueError, ExternalToolMissingError) as exc:
+    except (ValueError, OverlayToolsError) as exc:
         log.error(str(exc))
         return 1
     if args.pr and not context.is_git:

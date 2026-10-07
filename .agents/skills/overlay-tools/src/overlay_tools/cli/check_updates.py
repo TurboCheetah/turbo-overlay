@@ -21,6 +21,7 @@ from overlay_tools.core.report import (
     render_json,
     render_terminal_report,
 )
+from overlay_tools.core.update_policy import UpdatePolicyError, load_update_exclusions
 from overlay_tools.core.update_sources import (
     DEFAULT_UPDATE_SOURCES,
     PackageSourceContext,
@@ -330,6 +331,12 @@ def main(argv: list[str] | None = None) -> int:
         log.info("Run from overlay root or use --overlay-path")
         return 1
 
+    try:
+        exclusions = load_update_exclusions(overlay_root)
+    except UpdatePolicyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
     github_token = os.environ.get("GITHUB_TOKEN")
     cache_dir = overlay_root / ".agents" / "skills" / "overlay-tools" / ".cache"
     github_client = GitHubClient(token=github_token, cache_dir=cache_dir)
@@ -341,6 +348,14 @@ def main(argv: list[str] | None = None) -> int:
         packages = [p for p in packages if p.atom == args.package]
         if not packages:
             log.warning(f"Package '{args.package}' not found")
+
+    eligible_packages: list[PackageRef] = []
+    for pkg in packages:
+        if pkg.atom in exclusions:
+            print(f"Skipping {pkg.atom}: {exclusions[pkg.atom]}", file=sys.stderr)
+        else:
+            eligible_packages.append(pkg)
+    packages = eligible_packages
 
     if args.channel or args.exclude_channel:
         total_before = len(packages)

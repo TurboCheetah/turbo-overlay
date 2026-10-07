@@ -1,0 +1,167 @@
+#!/sbin/openrc-run
+# shellcheck shell=sh disable=SC2034
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+# OpenRC consumes service variables; not all parsed passwd fields are used here.
+
+name="T3 Code server"
+description="T3-owned protocol-3 runtime supervised by OpenRC"
+command="/usr/libexec/t3code-openrc"
+command_args="run"
+supervisor="supervise-daemon"
+pidfile="/run/${RC_SVCNAME:-t3code}.pid"
+respawn_delay=5
+respawn_max=5
+respawn_period=300
+retry="TERM/30/KILL/5"
+
+depend() {
+	need net
+	[ "${t3code_tailscale:-false}" != true ] || need tailscale
+}
+
+proxy_configuration() {
+	case ${t3code_tailscale:-false} in
+		false) return 0 ;;
+		true) ;;
+		*) eerror 't3code_tailscale must be true or false'; return 1 ;;
+	esac
+	case ${t3code_tailscale_https_port:-} in
+		''|*[!0-9]*) eerror 'An explicit Tailscale HTTPS port is required'; return 1 ;;
+	esac
+	[ "${t3code_tailscale_https_port}" -gt 0 ] &&
+		[ "${t3code_tailscale_https_port}" -le 65535 ] || {
+		eerror 'Invalid Tailscale HTTPS port'; return 1
+	}
+	[ "${t3code_tailscale_target:-}" = "http://127.0.0.1:${t3code_port:-3773}" ] || {
+		eerror 'An explicit Tailscale target matching the loopback server is required'
+		return 1
+	}
+	t3code_proxy_retries=${t3code_proxy_retries:-10}
+	case ${t3code_proxy_retries} in
+		''|*[!0-9]*) eerror 'Invalid proxy retry count'; return 1 ;;
+	esac
+	[ "${t3code_proxy_retries}" -gt 0 ] && [ "${t3code_proxy_retries}" -le 60 ] || {
+		eerror 'Proxy retries must be between 1 and 60'; return 1
+	}
+	if ! command -v tailscale >/dev/null || ! command -v curl >/dev/null; then
+		eerror 'Optional Tailscale requires tailscale and curl'; return 1
+	fi
+}
+
+configuration() {
+	proxy_configuration || return 1
+	[ -n "${t3code_user:-}" ] && [ -n "${t3code_home:-}" ] || {
+		eerror 'Set t3code_user and absolute t3code_home in /etc/conf.d/t3code'
+		return 1
+	}
+	case ${t3code_user} in
+		root|*[!a-zA-Z0-9_.-]*) eerror 'A non-root account name is required'; return 1 ;;
+	esac
+	case ${t3code_home} in
+		/*) ;;
+		*) eerror 't3code_home must be absolute'; return 1 ;;
+	esac
+	account=$(getent passwd "${t3code_user}") || {
+		eerror 'Service account does not exist'; return 1
+	}
+	IFS=: read -r account_name account_password account_uid account_gid account_gecos account_home account_shell <<EOF
+${account}
+EOF
+	case ${account_uid} in
+		''|0|*[!0-9]*) eerror 'Service account must have a nonzero uid'; return 1 ;;
+	esac
+	case ${account_home} in
+		/*) ;;
+		*) eerror 'Service account must have an absolute HOME'; return 1 ;;
+	esac
+	T3CODE_PORT=${t3code_port:-3773}
+	case ${T3CODE_PORT} in
+		''|*[!0-9]*) eerror 'Invalid t3code_port'; return 1 ;;
+	esac
+	[ "${T3CODE_PORT}" -gt 0 ] && [ "${T3CODE_PORT}" -le 65535 ] || {
+		eerror 'Invalid t3code_port'; return 1
+	}
+	command_user=${t3code_user}
+	# OpenRC's default supervisor expands directory through eval. A user home
+	# may contain spaces or shell metacharacters, so only run changes to HOME,
+	# after privilege drop. Keep OpenRC's root-side directory a fixed literal.
+	directory="/"
+	HOME=${account_home}
+	T3CODE_HOME=${t3code_home}
+	T3CODE_HELPER_PATH=${t3code_helper_path:-/usr/local/bin:/usr/bin:/bin}
+	T3CODE_HOST=127.0.0.1
+	T3CODE_MODE=web
+	T3CODE_NO_BROWSER=true
+	T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=false
+	T3CODE_TAILSCALE_SERVE=false
+	export HOME T3CODE_HOME T3CODE_HELPER_PATH T3CODE_HOST T3CODE_PORT
+	export T3CODE_MODE T3CODE_NO_BROWSER T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD
+	export T3CODE_TAILSCALE_SERVE
+	unset VITE_DEV_SERVER_URL T3CODE_BOOTSTRAP_FD T3_SERVICE_LAUNCHER_CONTEXT
+}
+
+wait_for() {
+	attempt=1
+	while [ "${attempt}" -le "${t3code_proxy_retries}" ]; do
+		"$1" && return 0
+		[ "${attempt}" -eq "${t3code_proxy_retries}" ] || sleep 1
+		attempt=$((attempt + 1))
+	done
+	eerror "Optional proxy readiness failed: $1"
+	return 1
+}
+
+tailscale_ready() {
+	status_json=$(timeout 5 tailscale status --json) &&
+		printf '%s' "${status_json}" | jq -e '.BackendState == "Running"' >/dev/null 2>&1
+}
+
+server_ready() {
+	descriptor=$(curl --fail --silent --show-error --max-time 2 --noproxy '*' \
+		"${t3code_tailscale_target}/.well-known/t3/environment") &&
+		printf '%s' "${descriptor}" | jq -e \
+			'.serverVersion | type == "string" and length > 0' >/dev/null 2>&1
+}
+
+start_pre() {
+	configuration || return 1
+	# Root selects only this packaged helper. No configured value is shell text.
+	su -s /bin/sh -m -c 'exec /usr/libexec/t3code-openrc check' -- "${t3code_user}" || {
+		eerror 'Unprivileged runtime check failed; initialize a complete protocol-3 runtime as the user'
+		return 1
+	}
+	[ "${t3code_tailscale:-false}" != true ] || wait_for tailscale_ready
+}
+
+start_post() {
+	[ "${t3code_tailscale:-false}" != true ] || {
+		proxy_configuration || return 1
+		wait_for server_ready || return 1
+		timeout 10 tailscale serve --bg "--https=${t3code_tailscale_https_port}" \
+			"${t3code_tailscale_target}" || {
+			eerror 'Tailscale Serve mapping failed'; return 1
+		}
+		if ! mapping=$(timeout 5 tailscale serve status --json); then
+			eerror 'Cannot read back Tailscale Serve mapping'; return 1
+		fi
+		if ! printf '%s' "${mapping}" | jq -e --arg port "${t3code_tailscale_https_port}" \
+				--arg target "${t3code_tailscale_target}" \
+				'.TCP[$port].HTTPS == true and any(.Web | to_entries[];
+					(.key | endswith(":" + $port)) and .value.Handlers["/"].Proxy == $target)' \
+				>/dev/null 2>&1; then
+			eerror 'Tailscale Serve read-back did not match the requested target'; return 1
+		fi
+	}
+	return 0
+}
+
+stop_post() {
+	[ "${t3code_tailscale:-false}" != true ] || {
+		proxy_configuration || return 1
+		timeout 10 tailscale serve "--https=${t3code_tailscale_https_port}" off || {
+			eerror 'Tailscale Serve cleanup failed'; return 1
+		}
+	}
+	return 0
+}

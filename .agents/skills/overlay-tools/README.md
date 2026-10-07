@@ -24,6 +24,19 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 .agents/skills/overlay-tools/bin/check-updates --exclude-channel nightly
 ```
 
+All scans, including explicit `--package` targets, honor the repository's
+[`metadata/update-exclusions.json`](../../../metadata/update-exclusions.json)
+before channel selection or network lookup. Skipped atoms and their reasons
+are printed on stderr, even with `--json`, and are omitted from results.
+Exit `0` means an eligible update exists, `1` means an error, and `2` means no
+eligible updates, including a scan where every package is excluded.
+
+Both deprecated T3 desktop packages and the locally versioned OpenRC adapter
+are excluded. See the [migration guide](../../../README.md#t3-code-desktop-and-openrc).
+The adapter is not a desktop replacement and must not be bumped from upstream
+runtime releases or nightly tags. Daily and weekly automation schedules remain
+unchanged.
+
 ### Bump Package Version
 
 ```bash
@@ -35,6 +48,32 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # With MY_PV and upstream URL
 .agents/skills/overlay-tools/bin/update-ebuild --pr -v 1.2.3 -m "1.2.3" --upstream-url "https://..." category/package
 ```
+
+`update-ebuild` rejects an excluded package with exit `1` and its reason before
+any ebuild or Manifest write, fetch, branch change, commit, or push. This also
+applies to `--dry-run`, `--pr`, `--yes`, and `--skip-git`; those flags do not
+override repository policy.
+
+### Repository update policy
+
+`metadata/update-exclusions.json` is a JSON object mapping exact,
+unversioned `category/package` atoms to non-empty explanation strings:
+
+```json
+{
+  "dev-util/example-bin": "Deprecated; use the upstream user installation."
+}
+```
+
+A missing file means no exclusions, so other overlays retain existing behavior.
+Malformed JSON, non-object data, duplicate atoms, invalid atom syntax, and
+non-string or blank reasons cause both commands to fail closed with exit `1`.
+Do not use versions, operators, wildcards, slots, or repository qualifiers in
+keys. Validate the whole policy before checking or updating any package.
+
+This file controls maintenance automation only. `profiles/package.mask`
+controls Portage package selection independently; a mask alone does not stop
+updates, and an update exclusion does not mask or uninstall a package.
 
 ### Test an exact ebuild in Docker
 
@@ -117,6 +156,7 @@ overlay-tools/
 │       ├── overlay.py          # Package discovery
 │       ├── report.py           # Output formatting
 │       ├── subprocess_utils.py # Shell commands
+│       ├── update_policy.py    # Explicit repository update exclusions
 │       └── versions.py         # Version handling
 └── tests/
 ```

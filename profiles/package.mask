@@ -1,0 +1,7 @@
+# 2026-10-07
+# Both T3 Code desktop packages are deprecated in favor of upstream installs.
+# Existing ebuilds remain for rollback; this mask does not uninstall them.
+# Migration: https://github.com/TurboCheetah/turbo-overlay/blob/master/README.md#t3-code-desktop-and-openrc
+# dev-util/t3code-openrc is a separate service adapter, not a desktop replacement.
+dev-util/t3code-bin
+dev-util/t3code-nightly-bin
