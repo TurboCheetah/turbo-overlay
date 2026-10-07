@@ -38,7 +38,8 @@ is a manual user action, never a package hook:
 curl --fail --location --output ./t3-install.sh https://t3.codes/install.sh
 # Read the downloaded script before executing it.
 less ./t3-install.sh
-T3CODE_CHANNEL=nightly T3CODE_HOME="$HOME/.t3" sh ./t3-install.sh
+t3_home="$HOME/.t3" # Choose the runtime home once; use this same path below.
+T3CODE_CHANNEL=nightly T3CODE_HOME="$t3_home" sh ./t3-install.sh
 "$HOME/.local/bin/t3" --version
 ```
 
@@ -51,13 +52,15 @@ expects systemd. The CLI installation and this adapter are separate steps.
 Copy the exact installed SemVer from the version output or upstream release.
 Use the upstream spelling, including any `-nightly` and build suffix, without
 a leading `v`. Do not use the Gentoo `_pre` spelling or the dist-tag `nightly`.
-Then explicitly initialize the already downloaded, complete runtime:
+Then explicitly initialize the already downloaded, complete runtime. If using
+a new shell, first set `t3_home` to the same absolute path selected for the
+installer and configured as `t3code_home`; do not substitute the default path
+when the runtime is elsewhere:
 
 ```sh
 version='REPLACE_WITH_EXACT_INSTALLED_SEMVER'
-runtime_home='<the absolute path installed above and configured as t3code_home>'
-T3CODE_HOME="$runtime_home" /usr/libexec/t3code-openrc initialize "$version"
-T3CODE_HOME="$runtime_home" /usr/libexec/t3code-openrc check
+T3CODE_HOME="$t3_home" /usr/libexec/t3code-openrc initialize "$version"
+T3CODE_HOME="$t3_home" /usr/libexec/t3code-openrc check
 ```
 
 Initialize and check with the same runtime home you configure as
@@ -78,7 +81,9 @@ t3code_user="YOUR_EXISTING_ACCOUNT"
 t3code_home="/ABSOLUTE/PATH/TO/THAT/ACCOUNTS/.t3"
 ```
 
-Quote paths containing spaces. The adapter obtains `HOME` from the configured
+Quote paths containing spaces. Set `t3code_home` to the exact absolute path
+selected as `t3_home` for installation and initialization above.
+The adapter obtains `HOME` from the configured
 account's passwd entry, sets its working directory to that home, and gives
 the unprivileged runtime a PATH containing `$HOME/.local/bin` followed by
 `t3code_helper_path`. Provider helpers such as Codex or Claude must be
