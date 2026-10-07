@@ -52,7 +52,10 @@ expects systemd. The CLI installation and this adapter are separate steps.
 Copy the exact installed SemVer from the version output or upstream release.
 Use the upstream spelling, including any `-nightly` and build suffix, without
 a leading `v`. Do not use the Gentoo `_pre` spelling or the dist-tag `nightly`.
-Then explicitly initialize the already downloaded, complete runtime:
+Then explicitly initialize the already downloaded, complete runtime. If using
+a new shell, first set `t3_home` to the same absolute path selected for the
+installer and configured as `t3code_home`; do not substitute the default path
+when the runtime is elsewhere:
 
 ```sh
 version='REPLACE_WITH_EXACT_INSTALLED_SEMVER'
@@ -79,8 +82,7 @@ t3code_home="/ABSOLUTE/PATH/TO/THAT/ACCOUNTS/.t3"
 ```
 
 Quote paths containing spaces. Set `t3code_home` to the exact absolute path
-selected as `t3_home` for installation and initialization above. If using a
-new shell, set `t3_home` to that same path before running the user commands.
+selected as `t3_home` for installation and initialization above.
 The adapter obtains `HOME` from the configured
 account's passwd entry, sets its working directory to that home, and gives
 the unprivileged runtime a PATH containing `$HOME/.local/bin` followed by
