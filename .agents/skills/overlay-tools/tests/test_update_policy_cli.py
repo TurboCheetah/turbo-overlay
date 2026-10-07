@@ -54,6 +54,23 @@ def github_calls(monkeypatch):
     return calls
 
 
+@pytest.mark.parametrize(
+    "atom", ["dev-util/t3code-bin", "dev-util/t3code-nightly-bin", "dev-util/t3code-openrc"]
+)
+def test_shipped_policy_excludes_t3_packages_at_check_cli(capsys, github_calls, atom):
+    root = Path(__file__).resolve().parents[4]
+    policy = json.loads((root / "metadata/update-exclusions.json").read_text())
+    assert atom in policy
+
+    result = check_updates.main(["--overlay-path", str(root), "--json", "--package", atom])
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert json.loads(captured.out) == []
+    assert f"Skipping {atom}: {policy[atom]}" in captured.err
+    assert github_calls == []
+
+
 def test_full_scan_skips_exclusions_before_upstream_lookup(tmp_path, capsys, github_calls):
     root = make_overlay(tmp_path)
     write_policy(root)

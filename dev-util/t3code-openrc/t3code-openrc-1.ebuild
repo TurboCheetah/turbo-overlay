@@ -14,7 +14,6 @@ IUSE="tailscale"
 
 RDEPEND="
 	app-misc/jq
-	app-shells/bash
 	sys-apps/coreutils
 	sys-apps/openrc
 	sys-apps/util-linux[su]
