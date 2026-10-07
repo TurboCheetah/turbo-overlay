@@ -18,10 +18,12 @@ VERSION = "0.0.46-nightly.202610072774"
 
 @pytest.fixture
 def sandbox():
-    # Never use pytest's default /tmp tree or the account's actual ~/.t3.
-    with tempfile.TemporaryDirectory(
-        prefix="t3-openrc-", dir="/home/turbo/.hermes/cache/scratch"
-    ) as directory:
+    # Never use the account's actual ~/.t3. Prefer an existing TMPDIR (a local
+    # harness sets one), otherwise fall back to the platform default so the
+    # suite stays portable on CI runners.
+    candidate = os.environ.get("TMPDIR")
+    base = candidate if candidate and Path(candidate).is_dir() else None
+    with tempfile.TemporaryDirectory(prefix="t3-openrc-", dir=base) as directory:
         yield Path(directory)
 
 

@@ -1,0 +1,10 @@
+DEFINED_PHASES=install postinst
+DESCRIPTION=OpenRC adapter for user-owned T3 Code server runtimes
+EAPI=8
+HOMEPAGE=https://t3.codes/
+IUSE=tailscale
+KEYWORDS=~amd64
+LICENSE=GPL-2
+RDEPEND=app-misc/jq app-shells/bash sys-apps/coreutils sys-apps/openrc sys-apps/util-linux[su] || ( sys-libs/glibc sys-libs/musl[-headers-only] ) tailscale? ( net-misc/curl net-vpn/tailscale )
+SLOT=0
+_md5_=dd5a46c9992fb513f498057568fa5d40
