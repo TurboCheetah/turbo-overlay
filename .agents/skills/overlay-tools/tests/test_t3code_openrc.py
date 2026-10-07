@@ -517,3 +517,25 @@ def test_check_rejects_protocol_two(home):
     result = invoke(home, "check")
     assert result.returncode != 0
     assert "protocol" in result.stderr.lower()
+
+
+def test_check_rejects_fifo_state_without_hanging(home):
+    """A FIFO must be rejected instead of blocking OpenRC's preflight forever."""
+    runtime(home)
+    path = home / "runtime/service-state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path)
+    env = dict(os.environ, T3CODE_HOME=str(home), HOME=str(home.parent))
+    try:
+        result = subprocess.run(
+            ["/bin/sh", str(HELPER), "check"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssertionError("check blocked on a FIFO state file") from exc
+    assert result.returncode != 0
+    assert "state" in result.stderr.lower()

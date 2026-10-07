@@ -29,6 +29,8 @@ complete_runtime() {
 		fail 'runtime is incomplete: sentinel must match version'
 }
 check() {
+	# jq -s on a FIFO would block forever and hang OpenRC's preflight.
+	[ -f "${state}" ] || fail 'state must be a regular file'
 	jq -se 'length == 1 and (.[0] | type == "object" and .protocol == 3)' \
 		"${state}" >/dev/null 2>&1 || fail 'state must be valid protocol 3 JSON'
 	version=$(jq -er --arg pattern "${semver}" \

@@ -63,8 +63,13 @@ For an OpenRC-hosted CLI runtime, read the
    template, not a command to paste with the placeholder still present:
 
    ```sh
-   T3CODE_HOME="$HOME/.t3" /usr/libexec/t3code-openrc initialize '<exact version>'
+   T3CODE_HOME='<the absolute path configured as t3code_home>' \
+     /usr/libexec/t3code-openrc initialize '<exact version>'
    ```
+
+   Initialize against the same runtime home you configured as `t3code_home`;
+   the service checks state under that exact path and refuses to start
+   without it.
 
    Use the exact installed SemVer, not `latest`, a release tag, or a Gentoo
    `_pre` version. Initialization does not download or replace the runtime.

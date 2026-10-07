@@ -55,9 +55,13 @@ Then explicitly initialize the already downloaded, complete runtime:
 
 ```sh
 version='REPLACE_WITH_EXACT_INSTALLED_SEMVER'
-T3CODE_HOME="$HOME/.t3" /usr/libexec/t3code-openrc initialize "$version"
-T3CODE_HOME="$HOME/.t3" /usr/libexec/t3code-openrc check
+runtime_home='<the absolute path installed above and configured as t3code_home>'
+T3CODE_HOME="$runtime_home" /usr/libexec/t3code-openrc initialize "$version"
+T3CODE_HOME="$runtime_home" /usr/libexec/t3code-openrc check
 ```
+
+Initialize and check with the same runtime home you configure as
+`t3code_home`; the installer default is `$HOME/.t3`.
 
 `initialize` requires a non-root uid, validates the executable and matching
 sentinel, and atomically publishes a private protocol-3 state file only if

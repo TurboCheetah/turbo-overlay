@@ -23,7 +23,7 @@
 - Retain all six existing desktop ebuilds. Add explanatory deprecation masks for `dev-util/t3code-bin` and `dev-util/t3code-nightly-bin` in `profiles/package.mask`.
 - Add explicit repository update exclusions in `metadata/update-exclusions.json`. Automatic check-updates must skip both retired desktop packages and the locally versioned adapter before upstream API calls. update-ebuild must reject excluded packages before mutation. Ordinary package discovery and unrelated checks remain unchanged; missing exclusions file means no exclusions. Invalid configuration fails clearly rather than silently bypassing policy.
 - README, the package guide and overlay-tools documentation explain which component each updater owns, upstream desktop migration, runtime bootstrap, package masking versus uninstall, and local custom-service replacement/config-protect review. No claim that this package has been installed or the deprecations published.
-- Scope exception: the protected AGENTS.md edit was denied. Leave it unchanged and report that limitation; do not retry or bypass the denial.
+- Scope note: the AGENTS.md edit was initially denied and later approved for this PR, which adds the "T3 Code update ownership" note there.
 
 ## Approved test seams
 

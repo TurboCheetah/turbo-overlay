@@ -7,6 +7,7 @@ import pytest
 
 from overlay_tools.cli import check_updates, update_ebuild
 from overlay_tools.core.github import ReleaseInfo
+from overlay_tools.core.update_policy import load_update_exclusions
 
 EXCLUSIONS = {
     "dev-util/t3code-bin": "Desktop deprecated; use upstream installers.",
@@ -252,3 +253,11 @@ def test_unreadable_policy_is_not_treated_as_missing(tmp_path, capsys, github_ca
     assert "Invalid update policy" in update_captured.err
     assert github_calls == []
     assert not (root / "net-im/goofcord/goofcord-2.ebuild").exists()
+
+
+def test_checked_in_policy_excludes_the_retired_atoms():
+    """The shipped policy, not only the fixture map, must carry these atoms."""
+    repo_root = Path(__file__).resolve().parents[4]
+    exclusions = load_update_exclusions(repo_root)
+    assert set(exclusions) == set(EXCLUSIONS)
+    assert all(reason.strip() for reason in exclusions.values())
