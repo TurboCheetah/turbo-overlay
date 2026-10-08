@@ -9,7 +9,7 @@ t3code_home=""
 
 # The adapter always binds 127.0.0.1. No browser or working-directory bootstrap.
 t3code_port="3773"
-# The user's $HOME/.local/bin is prepended by the unprivileged run helper.
+# The unprivileged helper prepends the user's ~/.local/bin and ~/.opencode/bin.
 t3code_helper_path="/usr/local/bin:/usr/bin:/bin"
 
 # Optional: requires the package's tailscale USE flag and a running tailscaled.

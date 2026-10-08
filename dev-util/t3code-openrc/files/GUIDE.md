@@ -85,8 +85,10 @@ Quote paths containing spaces. Set `t3code_home` to the exact absolute path
 selected as `t3_home` for installation and initialization above.
 The adapter obtains `HOME` from the configured
 account's passwd entry, sets its working directory to that home, and gives
-the unprivileged runtime a PATH containing `$HOME/.local/bin` followed by
-`t3code_helper_path`. Provider helpers such as Codex or Claude must be
+the unprivileged runtime a PATH containing `$HOME/.local/bin` and
+`$HOME/.opencode/bin` followed by `t3code_helper_path`. This includes the
+official standalone OpenCode installation without requiring a symlink.
+Provider helpers such as Codex, Claude or OpenCode must be
 installed for that account. The adapter does not install them.
 
 The default local port is upstream's 3773, configurable with `t3code_port`.
