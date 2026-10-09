@@ -485,6 +485,54 @@ def test_io_failure_removes_only_own_partial_outputs(
         assert not category.exists()
 
 
+def test_category_rmdir_enotempty_preserves_entry_and_diagnoses_residual(
+    overlay, monkeypatch, capsys
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    real_rmdir = os.rmdir
+
+    def failing_fsync(fd):
+        raise OSError("simulated disk failure")
+
+    def failing_rmdir(path, *, dir_fd=None, **kwargs):
+        if path == "dev-util":
+            # Simulate a concurrent writer's entry surviving the cleanup.
+            raise OSError(errno.ENOTEMPTY, "directory not empty")
+        return real_rmdir(path, dir_fd=dir_fd, **kwargs)
+
+    monkeypatch.setattr(os, "fsync", failing_fsync)
+    monkeypatch.setattr(os, "rmdir", failing_rmdir)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert "not empty; residual entries left untouched" in captured.err
+    assert category.exists()
+
+
+def test_publish_fsyncs_the_category_directory(overlay, monkeypatch, capsys):
+    import os
+
+    fsynced: list[tuple[int, str]] = []
+    real_fsync = os.fsync
+
+    def record_fsync(fd):
+        try:
+            path = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            path = "?"
+        fsynced.append((fd, path))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", record_fsync)
+    assert invoke(arguments(overlay, "--write")) == 0
+    assert "Written starter" in capsys.readouterr().out
+    paths = [path for _, path in fsynced]
+    # Staged-dir entry and publish rename each sync the category directory.
+    assert sum(path.endswith("dev-util") for path in paths) == 2
+
+
 @pytest.mark.parametrize("close_at", ["stage", "category", "root", "scan"])
 @pytest.mark.parametrize("write_failure", [False, True])
 @pytest.mark.parametrize("close_errno", ["EIO", "EINTR"])

@@ -395,6 +395,9 @@ def write_plan(plan: CreatePlan) -> None:
                         )
             if cleanup_errors:
                 raise ValueError("artifact descriptor cleanup failed before publication")
+        # Make the staged directory entry durable before publication, matching
+        # the per-file fsync above.
+        os.fsync(category_fd)
         os.fchmod(stage_fd, 0o755)
         check_attached(plan, category_fd, category)
         if not same_entry(category_fd, stage, stage_identity):
@@ -412,6 +415,9 @@ def write_plan(plan: CreatePlan) -> None:
             if not same_entry(stage_fd, filename, expected):
                 raise ValueError("staging file changed; refusing publication")
         rename_exclusive(category_fd, stage, package)
+        # The publish only survives power loss if the containing directory
+        # entry is synced, matching the per-file fsync above.
+        os.fsync(category_fd)
         published = True
         check_attached(plan, category_fd, category)
         if not same_entry(category_fd, package, stage_identity):
@@ -451,6 +457,8 @@ def write_plan(plan: CreatePlan) -> None:
                 try:
                     if same_entry(category_fd, directory, stage_identity):
                         os.rmdir(directory, dir_fd=category_fd)
+                        # Match the per-file durability intent for rollback.
+                        os.fsync(category_fd)
                     else:
                         cleanup_errors.append(f"{directory_path} moved or replaced; left untouched")
                 except OSError as exc:
@@ -466,7 +474,12 @@ def write_plan(plan: CreatePlan) -> None:
                         f"{plan.root / category} moved or replaced; left untouched"
                     )
             except OSError as exc:
-                if exc.errno != errno.ENOTEMPTY:
+                if exc.errno == errno.ENOTEMPTY:
+                    # Preserve the other writer's entry, keep the diagnostic.
+                    cleanup_errors.append(
+                        f"{plan.root / category} not empty; residual entries left untouched"
+                    )
+                else:
                     cleanup_errors.append(f"{plan.root / category}: {exc}")
         cleanup_close(root_fd, plan.root, cleanup_errors)
     detail = f"; cleanup incomplete, inspect manually: {'; '.join(cleanup_errors)}"
