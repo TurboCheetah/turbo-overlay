@@ -94,6 +94,40 @@ the standard-library Python checker read-only next to `run-ebuild`. Stage3's
 `python3` performs the checks. There is no shell `eval` or payload execution.
 Legacy-only normal-path invocations retain their original positional transport.
 
+## Direct runner arguments
+
+The host CLI options above do not need a separator. When calling `docker/run-ebuild`
+directly, put a standalone `--` immediately after the ebuild to select assertion
+options, followed by at least one assertion spec. Without this boundary, every
+remaining argument is a legacy presence path, even `--expect-mode`,
+`--package-checks`, or `--assertions-json`. The runner
+does not guess the argument format from path names or filesystem contents.
+
+```sh
+# Legacy presence paths, including a filename that looks like an option:
+docker/run-ebuild dev-util/t3code-openrc/t3code-openrc-1-r1.ebuild \
+  etc/init.d/t3code --expect-mode
+
+# Explicit assertion options and registry checks:
+docker/run-ebuild dev-util/t3code-openrc/t3code-openrc-1-r1.ebuild -- \
+  --package-checks --expect-mode 0644:etc/conf.d/t3code
+```
+
+`EBUILD --` still checks the lone legacy filename `--`. With further arguments,
+the boundary position reserves that name. To check it as the first of several
+paths, use `EBUILD -- --expect -- OTHER_PATH`, or the host CLI's `--expect=--`.
+A `--` after another legacy path remains a filename, not a boundary.
+
+The host sends strong checks as `EBUILD -- --assertions-json JSON` and mounts
+both the current runner and checker read-only, so reusing an older stage3 image
+does not reuse old helper code. JSON is an exclusive assertion-input format.
+Neither the runner nor the standalone helper accepts it alongside positional
+assertions, assertion options, or package checks. Mixed input exits `2` before
+checks, Portage configuration writes, dependency installation, or phases. The
+helper's `--image`, `--ebuild`, and `--registry` remain control arguments, not
+assertion specs. Combine explicit and registry checks through the host CLI or
+the direct runner's non-JSON assertion mode instead.
+
 Exit codes are `0` for a passing test, `1` for a dependency/phase/assertion failure,
 and `2` for invalid arguments, a missing or malformed requested registry, an
 unregistered exact target, or an unusable environment.

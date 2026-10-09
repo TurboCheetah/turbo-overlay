@@ -33,6 +33,8 @@ def parse_specs(
             checks.extend(package_checks(ebuild, registry))
             continue
         if arg == "--assertions-json":
+            if len(args) != 2:
+                raise ValueError("cannot combine --assertions-json with assertion specs")
             try:
                 checks.extend(validate_checks(load_json(next(pending))))
             except StopIteration as exc:
@@ -246,12 +248,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("validate", "check"))
     parser.add_argument("--image", type=Path)
-    parser.add_argument("--assertions-json")
+    parser.add_argument("--assertions-json", action="append")
     parser.add_argument("--ebuild")
     parser.add_argument("--registry", type=Path)
     args, specs = parser.parse_known_args(argv)
     try:
         specs = specs[1:] if specs[:1] == ["--"] else specs
+        if args.assertions_json is not None:
+            if len(args.assertions_json) != 1:
+                raise ValueError("--assertions-json may be supplied only once")
+            args.assertions_json = args.assertions_json[0]
+        if args.assertions_json is not None and specs:
+            raise ValueError("cannot combine --assertions-json with assertion specs")
         checks = (
             validate_checks(load_json(args.assertions_json))
             if args.assertions_json is not None

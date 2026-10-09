@@ -99,6 +99,129 @@ for item in json.loads(Path(os.environ['FIXTURES']).read_text()):
 
 
 @pytest.mark.parametrize(
+    "specs",
+    [
+        ["--assertions-json", "[]", "missing"],
+        ["missing", "--assertions-json", "[]"],
+        ["--assertions-json", "[]", "--expect-mode", "0644:missing"],
+        ["--assertions-json", "[]", "--package-checks"],
+        ["--assertions-json", "[]", "--unknown"],
+        ["--assertions-json", "[]", "--assertions-json", "[]"],
+    ],
+)
+def test_runner_rejects_mixed_json_assertions_before_portage(runner, tmp_path, specs):
+    result = runner("--", *specs)
+    assert result.returncode == 2, result.stderr
+    assert "cannot combine --assertions-json" in result.stderr
+    assert not (tmp_path / "events").exists()
+    assert not (tmp_path / "config/etc/portage/repos.conf").exists()
+    assert not (tmp_path / "build").exists()
+
+
+@pytest.mark.parametrize("action", ["validate", "check"])
+@pytest.mark.parametrize(
+    "json_arguments",
+    [
+        ["--assertions-json", "not-json", "--assertions-json", "[]"],
+        ["--assertions-json", '[{"kind":"exists","path":"missing"}]', "--assertions-json", "[]"],
+        ["--assertions-json=[]", "--assertions-json=[]"],
+    ],
+)
+def test_helper_rejects_repeated_json_inputs(tmp_path, action, json_arguments):
+    image = tmp_path / "image"
+    image.mkdir()
+    result = subprocess.run(
+        [
+            "python3",
+            str(test_ebuild.TOOLS_ROOT / "src/overlay_tools/core/staged_assertions.py"),
+            action,
+            "--image",
+            str(image),
+            *json_arguments,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2, result.stdout
+    assert "--assertions-json may be supplied only once" in result.stderr
+    assert not result.stdout
+
+
+@pytest.mark.parametrize("action", ["validate", "check"])
+@pytest.mark.parametrize("separator", [[], ["--"]])
+@pytest.mark.parametrize(
+    "specs",
+    [["missing"], ["--expect-mode", "0644:missing"], ["--package-checks"], ["--unknown"]],
+)
+def test_helper_rejects_json_with_assertion_specs(tmp_path, action, separator, specs):
+    image = tmp_path / "image"
+    image.mkdir()
+    result = subprocess.run(
+        [
+            "python3",
+            str(test_ebuild.TOOLS_ROOT / "src/overlay_tools/core/staged_assertions.py"),
+            action,
+            "--image",
+            str(image),
+            "--assertions-json",
+            "[]",
+            *separator,
+            *specs,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "cannot combine --assertions-json" in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "--expect",
+        "--expect-executable",
+        "--expect-type",
+        "--expect-mode",
+        "--expect-link-target",
+        "--expect-resolved-link",
+        "--package-checks",
+        "--assertions-json",
+        "--unknown",
+    ],
+)
+@pytest.mark.parametrize("prefix", [[], ["usr/bin/tool"]])
+def test_direct_runner_preserves_legacy_option_looking_filename(runner, name, prefix):
+    files = [{"path": name, "target": "/missing"}, {"path": "usr/bin/tool"}]
+    result = runner(*prefix, name, files=files)
+    assert result.returncode == 0, result.stderr
+    assert f"OK: staged {name}" in result.stdout
+    result = runner(*prefix, name, files=[{"path": "usr/bin/tool"}])
+    assert result.returncode == 1
+    assert f"Missing staged path: {name}" in result.stderr
+
+
+def test_lone_separator_remains_a_legacy_filename(runner):
+    result = runner("--", files=[{"path": "--", "target": "/missing"}])
+    assert result.returncode == 0, result.stderr
+    assert "OK: staged --" in result.stdout
+    result = runner("--")
+    assert result.returncode == 1
+    assert "Missing staged path: --" in result.stderr
+
+
+def test_only_immediate_separator_selects_assertion_mode(runner):
+    result = runner("tool", "--", files=[{"path": "tool"}, {"path": "--"}])
+    assert result.returncode == 0, result.stderr
+    assert "OK: staged --" in result.stdout
+    result = runner("--", "--expect", "--", files=[{"path": "--"}])
+    assert result.returncode == 0, result.stderr
+    assert "OK: exists --" in result.stdout
+
+
+@pytest.mark.parametrize(
     ("files", "code"),
     [
         ([{"path": "usr/bin/tool", "mode": "0755"}], 0),
@@ -116,7 +239,7 @@ for item in json.loads(Path(os.environ['FIXTURES']).read_text()):
 def test_executable_requires_regular_file_with_execute_bits_without_running_it(
     runner, tmp_path: Path, files: list[dict[str, str]], code: int
 ) -> None:
-    result = runner("--expect-executable", "usr/bin/tool", files=files)
+    result = runner("--", "--expect-executable", "usr/bin/tool", files=files)
     assert result.returncode == code, result.stderr
     if code:
         assert "Assertion failed" in result.stderr
@@ -136,7 +259,7 @@ def test_executable_requires_regular_file_with_execute_bits_without_running_it(
     ],
 )
 def test_type_distinguishes_final_symlink_and_special_files(runner, spec, files, code):
-    result = runner("--expect-type", spec, files=files)
+    result = runner("--", "--expect-type", spec, files=files)
     assert result.returncode == code, result.stderr
     if code:
         assert "Assertion failed" in result.stderr
@@ -155,6 +278,7 @@ def test_type_distinguishes_final_symlink_and_special_files(runner, spec, files,
 )
 def test_mode_compares_all_permission_and_special_bits(runner, expected, actual, code):
     result = runner(
+        "--",
         "--expect-mode",
         f"{expected}:usr/bin/tool",
         files=[
@@ -170,9 +294,9 @@ def test_mode_compares_all_permission_and_special_bits(runner, expected, actual,
 @pytest.mark.parametrize("target", ["/missing", "../../opt/tool", "$(touch nope);a=b c"])
 def test_link_target_is_exact_text_without_resolution_or_shell_execution(runner, target):
     files = [{"path": "usr/bin/tool", "target": target}]
-    result = runner("--expect-link-target", f"usr/bin/tool={target}", files=files)
+    result = runner("--", "--expect-link-target", f"usr/bin/tool={target}", files=files)
     assert result.returncode == 0, result.stderr
-    result = runner("--expect-link-target", "usr/bin/tool=other", files=files)
+    result = runner("--", "--expect-link-target", "usr/bin/tool=other", files=files)
     assert result.returncode == 1
     assert "Assertion failed" in result.stderr
 
@@ -195,7 +319,7 @@ def test_link_target_is_exact_text_without_resolution_or_shell_execution(runner,
     ],
 )
 def test_resolved_link_requires_a_link_and_existing_image_rooted_target(runner, files, code):
-    result = runner("--expect-resolved-link", "usr/bin/tool", files=files)
+    result = runner("--", "--expect-resolved-link", "usr/bin/tool", files=files)
     assert result.returncode == code, result.stderr
     if code:
         assert "Assertion failed" in result.stderr
@@ -217,7 +341,7 @@ def test_resolved_link_requires_a_link_and_existing_image_rooted_target(runner, 
     ],
 )
 def test_malformed_specs_fail_before_portage_or_config_writes(runner, tmp_path, args):
-    result = runner(*args)
+    result = runner("--", *args)
     assert result.returncode == 2, result.stderr
     assert not (tmp_path / "events").exists()
     assert not (tmp_path / "config/etc/portage/repos.conf").exists()
@@ -260,8 +384,8 @@ def test_host_cli_transports_validated_assertions_as_json_with_readonly_helper(
     helper_mount = next(arg for arg in cmd if "dst=/usr/local/bin/staged-assertions.py" in arg)
     assert helper_mount.endswith(",readonly")
     specs = cmd[cmd.index(EBUILD) + 1 :]
-    assert specs[0] == "--assertions-json"
-    checks = json.loads(specs[1])
+    assert specs[:2] == ["--", "--assertions-json"]
+    checks = json.loads(specs[2])
     assert checks == [
         {"kind": "exists", "path": "usr/bin/tool"},
         {"kind": "executable", "path": "usr/bin/tool"},
@@ -285,7 +409,7 @@ def test_symlinked_install_image_is_an_assertion_failure(runner, tmp_path):
     outside.mkdir()
     (outside / "tool").touch()
     (outside / "tool").chmod(0o755)
-    result = runner("--expect-executable", "tool", image_target=str(outside))
+    result = runner("--", "--expect-executable", "tool", image_target=str(outside))
     assert result.returncode == 1, result.stderr
     assert "install image must be a real directory" in result.stderr
 
@@ -296,7 +420,7 @@ def test_absolute_link_never_reads_host_target(runner, tmp_path, flag):
     outside.write_text("host only")
     outside.chmod(0o755)
     spec = "0755:usr/bin/tool" if flag == "--expect-mode" else "usr/bin/tool"
-    result = runner(flag, spec, files=[{"path": "usr/bin/tool", "target": str(outside)}])
+    result = runner("--", flag, spec, files=[{"path": "usr/bin/tool", "target": str(outside)}])
     assert result.returncode == 1, result.stderr
     assert "Assertion failed" in result.stderr
 
@@ -307,7 +431,7 @@ def test_rejects_escape_and_link_cycles(runner, target):
         {"path": "usr/bin/loop", "target": target},
         {"path": "usr/bin/other", "target": "loop"},
     ]
-    result = runner("--expect-resolved-link", "usr/bin/loop", files=files)
+    result = runner("--", "--expect-resolved-link", "usr/bin/loop", files=files)
     assert result.returncode == 1
     assert "Assertion failed" in result.stderr
 
@@ -316,14 +440,19 @@ def test_rejects_escape_and_link_cycles(runner, target):
 def test_link_chain_has_a_bounded_depth(runner, count):
     files = [{"path": f"opt/link{i}", "target": f"link{i + 1}"} for i in range(count)]
     files.append({"path": f"opt/link{count}", "mode": "0755"})
-    result = runner("--expect-executable", "opt/link0", files=files)
+    result = runner("--", "--expect-executable", "opt/link0", files=files)
     assert result.returncode == (0 if count == 40 else 1), result.stderr
 
 
 def test_strong_checks_follow_parent_links_inside_image_but_legacy_does_not(runner):
     files = [{"path": "opt/real/tool", "mode": "0755"}, {"path": "usr/bin", "target": "/opt/real"}]
     result = runner(
-        "--expect-executable", "usr/bin/tool", "--expect-type", "file:usr/bin/tool", files=files
+        "--",
+        "--expect-executable",
+        "usr/bin/tool",
+        "--expect-type",
+        "file:usr/bin/tool",
+        files=files,
     )
     assert result.returncode == 0, result.stderr
     result = runner("usr/bin/tool", files=files)
@@ -331,8 +460,10 @@ def test_strong_checks_follow_parent_links_inside_image_but_legacy_does_not(runn
     assert "Missing staged path" in result.stderr
 
 
+@pytest.mark.parametrize("name", ["--expect-mode", "--package-checks", "--assertions-json", "--"])
+@pytest.mark.parametrize("strong", [False, True])
 def test_legacy_expect_preserves_path_names_that_look_like_new_options(
-    runner, tmp_path, monkeypatch
+    runner, tmp_path, monkeypatch, name, strong
 ):
     calls = []
 
@@ -348,16 +479,24 @@ def test_legacy_expect_preserves_path_names_that_look_like_new_options(
                 EBUILD,
                 "--overlay-path",
                 str(tmp_path / "overlay"),
-                "--expect=--expect-mode",
+                f"--expect={name}",
+                *(["--expect-mode", "0755:tool"] if strong else []),
             ]
         )
         == 0
     )
     cmd = calls[-1]
+    specs = cmd[cmd.index(EBUILD) + 1 :]
+    assert specs[:2] == ["--", "--assertions-json"]
+    helper_mount = next(arg for arg in cmd if "dst=/usr/local/bin/staged-assertions.py" in arg)
+    assert helper_mount.endswith(",readonly")
     result = runner(
-        *cmd[cmd.index(EBUILD) + 1 :], files=[{"path": "--expect-mode", "target": "/missing"}]
+        *specs, files=[{"path": name, "target": "/missing"}, {"path": "tool", "mode": "0755"}]
     )
     assert result.returncode == 0, result.stderr
+    result = runner(*specs, files=[{"path": "tool", "mode": "0755"}])
+    assert result.returncode == 1
+    assert f"exists {name}" in result.stderr
 
 
 @pytest.mark.parametrize("revision", ["1", "1-r1"])
@@ -375,12 +514,12 @@ def test_openrc_registry_checks_adapter_artifacts_without_starting_service(
         {"path": "usr/libexec/t3code-openrc", "mode": "0755"},
         {"path": f"usr/share/doc/t3code-openrc-{revision}", "type": "directory"},
     ]
-    result = runner("--package-checks", ebuild=ebuild, files=files)
+    result = runner("--", "--package-checks", ebuild=ebuild, files=files)
     assert result.returncode == 0, result.stderr
     assert "OK: executable etc/init.d/t3code" in result.stdout
     assert "OK: mode usr/libexec/t3code-openrc" in result.stdout
     files[2]["mode"] = "0644"
-    result = runner("--package-checks", ebuild=ebuild, files=files)
+    result = runner("--", "--package-checks", ebuild=ebuild, files=files)
     assert result.returncode == 1
     assert "usr/libexec/t3code-openrc" in result.stderr
     assert not (tmp_path / "payload-executed").exists()
@@ -390,6 +529,7 @@ def test_openrc_registry_checks_adapter_artifacts_without_starting_service(
 def test_legacy_presence_accepts_dangling_final_link_even_with_strong_checks(runner, strong):
     args = ["usr/bin/tool"]
     if strong:
+        args.insert(0, "--")
         args.extend(["--expect-type", "symlink:usr/bin/tool"])
     result = runner(*args, files=[{"path": "usr/bin/tool", "target": "/missing"}])
     assert result.returncode == 0, result.stderr
@@ -410,10 +550,11 @@ def test_package_checks_are_opt_in_and_combine_with_explicit_assertions(runner, 
     )
     files = [{"path": "usr/bin/tool", "mode": "0644"}]
     assert runner(files=files).returncode == 0
-    result = runner("--package-checks", files=files)
+    result = runner("--", "--package-checks", files=files)
     assert result.returncode == 1
     assert "Assertion failed" in result.stderr
     result = runner(
+        "--",
         "--package-checks",
         "--expect-type",
         "file:usr/bin/tool",
@@ -455,7 +596,7 @@ def test_bad_or_missing_package_registry_fails_before_side_effects(runner, tmp_p
         metadata = tmp_path / "overlay/metadata"
         metadata.mkdir()
         (metadata / "test-assertions.json").write_text(content)
-    result = runner("--package-checks")
+    result = runner("--", "--package-checks")
     assert result.returncode == 2, result.stderr
     assert not (tmp_path / "events").exists()
     assert not (tmp_path / "config/etc/portage/repos.conf").exists()
@@ -512,7 +653,7 @@ def test_invalid_unrelated_registry_atom_fails_before_any_portage_side_effect(
         }
 
     before = config_state()
-    result = runner("--package-checks", files=[{"path": "x"}])
+    result = runner("--", "--package-checks", files=[{"path": "x"}])
     assert result.returncode == 2, result.stderr
     assert "invalid exact package atom" in result.stderr
     assert atom in result.stderr
@@ -543,7 +684,7 @@ def test_valid_unrelated_registry_atoms_preserve_pms_names_and_versions(runner, 
     (metadata / "test-assertions.json").write_text(
         json.dumps({"version": 1, "packages": {"=dev-util/example-1": checks, atom: checks}})
     )
-    result = runner("--package-checks", files=[{"path": "x"}])
+    result = runner("--", "--package-checks", files=[{"path": "x"}])
     assert result.returncode == 0, result.stderr
     assert "OK: exists x" in result.stdout
     assert "ebuild" in (tmp_path / "events").read_text()
@@ -613,7 +754,7 @@ def test_shell_characters_in_link_text_never_execute(runner, tmp_path):
     marker = tmp_path / "shell-evaluated"
     target = f"$(touch {marker});a=b c"
     result = runner(
-        "--expect-link-target", f"alias={target}", files=[{"path": "alias", "target": target}]
+        "--", "--expect-link-target", f"alias={target}", files=[{"path": "alias", "target": target}]
     )
     assert result.returncode == 0, result.stderr
     assert not marker.exists()
@@ -669,7 +810,8 @@ def test_host_package_checks_are_expanded_and_combined(runner, tmp_path, monkeyp
     )
     cmd = calls[-1]
     specs = cmd[cmd.index(EBUILD) + 1 :]
-    assert json.loads(specs[1]) == [
+    assert specs[:2] == ["--", "--assertions-json"]
+    assert json.loads(specs[2]) == [
         {"kind": "executable", "path": "tool"},
         {"kind": "mode", "path": "tool", "mode": "4711"},
     ]

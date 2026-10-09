@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         checks = parse_specs(
             specs, ebuild=args.ebuild, registry=overlay / "metadata/test-assertions.json"
         )
-        runner_args = ["--assertions-json", json.dumps(checks)] if strong else args.expect
+        runner_args = ["--", "--assertions-json", json.dumps(checks)] if strong else args.expect
         mounts = [
             bind_mount(overlay, CONTAINER_REPO),
             bind_mount(TOOLS_ROOT / "docker/run-ebuild", CONTAINER_SCRIPT),
