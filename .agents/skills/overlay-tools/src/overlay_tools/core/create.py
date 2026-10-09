@@ -232,7 +232,8 @@ def build_plan(
     validate_url(upstream_url)
     validate_url(homepage)
     if not re.fullmatch(
-        r"[A-Za-z0-9_+.'-]+@[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,}", maintainer_email
+        r"[A-Za-z0-9_+'-]+(?:\.[A-Za-z0-9_+'-]+)*@[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,}",
+        maintainer_email,
     ):
         raise ValueError("maintainer-email must be an explicit plain email address")
     if maintainer_name is not None:

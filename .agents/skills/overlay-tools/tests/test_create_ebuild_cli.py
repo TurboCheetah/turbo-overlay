@@ -87,6 +87,17 @@ def test_default_preview_renders_both_artifacts_without_creating_category(overla
     assert not (overlay / "dev-util").exists()
 
 
+@pytest.mark.parametrize(
+    "email",
+    ["first.last@example.org", "owner+tag@example.org", "o'brien@example.org"],
+)
+def test_dotted_atext_local_parts_are_accepted(overlay, capsys, email):
+    args = arguments(overlay)
+    args[args.index("--maintainer-email") + 1] = email
+    assert invoke(args) == 0
+    assert f"<email>{email}</email>" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("mode", ["--dry-run", "--write"])
 @pytest.mark.parametrize(
     "url",
@@ -181,6 +192,9 @@ def test_keyword_override_is_literal_and_not_host_detected(overlay, capsys, keyw
         ("--homepage", "https://example.org/`id`"),
         ("--maintainer-email", "bad-email"),
         ("--maintainer-email", "owner@example.org\n<name>injected</name>"),
+        ("--maintainer-email", "owner..name@example.org"),
+        ("--maintainer-email", "owner.@example.org"),
+        ("--maintainer-email", ".owner@example.org"),
         ("--maintainer-name", "$(id)"),
         ("--binary-name", "../outside"),
         ("--binary-name", "--help"),
