@@ -1528,6 +1528,88 @@ def test_write_requires_the_exact_long_option(overlay):
     assert not (overlay / "dev-util").exists()
 
 
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize(
+    "email", ["owner..name@example.org", "owner.@example.org", ".owner@example.org"]
+)
+def test_launcher_rejects_malformed_maintainer_local_dots_before_any_artifact(
+    overlay, tmp_path, mode, email
+):
+    import subprocess
+
+    launcher = Path(__file__).resolve().parents[1] / "bin/create-ebuild"
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+    result = subprocess.run(
+        [str(launcher), *arguments(overlay, mode, "--maintainer-email", email)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout
+    assert "maintainer-email must be an explicit plain email address" in result.stderr
+    assert not result.stdout
+    assert sorted(p.name for p in overlay.iterdir()) == ["metadata", "profiles"]
+    assert {
+        p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize(
+    "email",
+    [
+        "owner.name@example.org",
+        "owner_name@example.org",
+        "o'owner@example.org",
+        "owner-name@example.org",
+        "owner+name@example.org",
+    ],
+)
+def test_launcher_preserves_valid_maintainer_local_parts_and_xml_text(
+    overlay, tmp_path, mode, email
+):
+    import subprocess
+    import xml.etree.ElementTree as ET
+
+    launcher = Path(__file__).resolve().parents[1] / "bin/create-ebuild"
+    result = subprocess.run(
+        [
+            str(launcher),
+            *arguments(
+                overlay, mode, "--maintainer-email", email, "--maintainer-name", "O'Brian & <Team>"
+            ),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr
+    assert f"<email>{email}</email>" in result.stdout
+    assert "<name>O'Brian &amp; &lt;Team&gt;</name>" in result.stdout
+    if mode == "--write":
+        assert "Written starter only" in result.stdout
+        package = overlay / "dev-util/example-bin"
+        assert sorted(p.name for p in package.iterdir()) == [
+            "example-bin-1.2.3.ebuild",
+            "metadata.xml",
+        ]
+        text = (package / "metadata.xml").read_text(encoding="utf-8")
+    else:
+        assert "Preview only" in result.stdout
+        assert sorted(p.name for p in overlay.iterdir()) == ["metadata", "profiles"]
+        text = result.stdout.split("--- dev-util/example-bin/metadata.xml ---\n", 1)[1].split(
+            "\nNot an installable package yet.", 1
+        )[0]
+    assert f"<email>{email}</email>" in text
+    assert "<name>O'Brian &amp; &lt;Team&gt;</name>" in text
+    metadata = ET.fromstring(text)
+    assert metadata.findtext("maintainer/email") == email
+    assert metadata.findtext("maintainer/name") == "O'Brian & <Team>"
+
+
 def test_launcher_runs_offline_preview_write_and_refusal_from_another_directory(overlay, tmp_path):
     import subprocess
     import xml.etree.ElementTree as ET

@@ -119,6 +119,11 @@ This initial interface intentionally accepts a conservative subset:
   Names are at most 120 characters. Bash substitutions, backslashes, semicolons,
   pipes and template markers are rejected. Apostrophes are Bash-quoted; XML text
   is escaped.
+- Maintainer emails must be explicit plain addresses. The local part accepts
+  ASCII letters, digits, underscores, plus signs, apostrophes and hyphens, with
+  single dots only between nonempty groups. Leading, trailing or repeated dots
+  are rejected before preview or writes. Quoted local parts and display names
+  are not supported; accepted addresses are preserved literally in XML text.
 - Binary names are single non-option filename components, not relative paths.
   Keyword tokens are syntactic architecture names with optional `~`; the tool
   does not verify architecture support.
