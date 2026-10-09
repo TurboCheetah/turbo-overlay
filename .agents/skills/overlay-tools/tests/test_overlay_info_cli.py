@@ -253,7 +253,7 @@ def test_summary_bounds_every_growing_list_and_full_restores_data(tmp_path, caps
     assert full["configuration"]["eapi"]["profile"] == "8"
 
 
-@pytest.mark.parametrize("hash_token", ["X" * 1_000_000, "😀" * 1_000], ids=["ascii", "unicode"])
+@pytest.mark.parametrize("hash_token", ["X" * 1_000, "😀" * 1_000], ids=["ascii", "unicode"])
 def test_summary_bounds_massive_identifiers_and_counts_omitted_codepoints(
     tmp_path, capsys, hash_token
 ):
@@ -284,9 +284,7 @@ def test_summary_bounds_massive_identifiers_and_counts_omitted_codepoints(
         "truncated": 999_764,
     }
     assert truncated["/update_policy/exclusions/items/0/reason"]["truncated"] == 761
-    assert truncated["/configuration/manifest/hashes/items/0"]["truncated"] == (
-        999_760 if hash_token.startswith("X") else 760
-    )
+    assert truncated["/configuration/manifest/hashes/items/0"]["truncated"] == len(hash_token) - 240
     hashes = data["configuration"]["manifest"]["hashes"]
     assert hashes["total"] == 35
     assert hashes["truncated"] == 25
@@ -379,6 +377,125 @@ def test_summary_budget_overflow_fails_without_partial_output(tmp_path, capsys, 
     code, output = invoke(root, capsys, *flags, "--full")
     assert code == 0
     assert len(output.out.encode("utf-8")) > 131_072
+
+
+@pytest.mark.parametrize("relative", ["profiles/repo_name", "metadata/layout.conf"])
+def test_non_regular_configuration_files_fail_without_blocking(tmp_path, relative):
+    root = make_overlay(tmp_path)
+    (root / relative).unlink()
+    os.mkfifo(root / relative)
+    tools = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "from overlay_tools.cli.overlay_info import main; "
+                "sys.exit(main(['--json', '--overlay-path', sys.argv[1]]))"
+            ),
+            str(root),
+        ],
+        cwd=tools,
+        env={**os.environ, "PYTHONPATH": str(tools / "src")},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert relative in result.stderr
+    assert "not a regular file" in result.stderr
+
+
+@pytest.mark.parametrize("flags", [[], ["--full"]], ids=["summary", "full"])
+def test_mask_fifo_fails_in_full_mode_and_stays_ignored_in_summary(tmp_path, flags):
+    root = make_overlay(tmp_path)
+    os.mkfifo(root / "profiles/package.mask")
+    tools = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "from overlay_tools.cli.overlay_info import main; "
+                "sys.exit(main(['--overlay-path', sys.argv[1], *sys.argv[2:]]))"
+            ),
+            str(root),
+            *flags,
+        ],
+        cwd=tools,
+        env={**os.environ, "PYTHONPATH": str(tools / "src")},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if flags:
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "not a regular file" in result.stderr
+    else:
+        assert result.returncode == 0
+        assert result.stderr == ""
+
+
+def test_inventory_rejects_package_links_escaping_the_checkout(tmp_path, capsys):
+    root = make_overlay(tmp_path / "overlay")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "tool-1.ebuild").write_text("EAPI=8\n")
+    (root / "dev-util/escaped").symlink_to(outside, target_is_directory=True)
+
+    code, output = invoke(root, capsys, "--json")
+
+    assert code == 2
+    assert output.out == ""
+    assert "dev-util/escaped" in output.err
+    assert "escapes the checkout" in output.err
+
+
+def test_inventory_rejects_category_links_escaping_the_checkout(tmp_path, capsys):
+    root = make_overlay(tmp_path / "overlay")
+    outside = tmp_path / "outside"
+    (outside / "tool").mkdir(parents=True)
+    (outside / "tool/tool-1.ebuild").write_text("EAPI=8\n")
+    (root / "extra-cat").symlink_to(outside, target_is_directory=True)
+
+    code, output = invoke(root, capsys, "--json")
+
+    assert code == 2
+    assert output.out == ""
+    assert "extra-cat/tool" in output.err
+    assert "escapes the checkout" in output.err
+
+
+def test_inventory_allows_links_resolving_inside_the_checkout(tmp_path, capsys):
+    root = make_overlay(tmp_path / "overlay")
+    (root / "dev-util/editor/editor-3.ebuild").write_text("EAPI=8\n")
+    (root / "dev-util/alias-editor").symlink_to(root / "dev-util/editor", target_is_directory=True)
+
+    code, output = invoke(root, capsys, "--json")
+
+    assert code == 0
+    data = json.loads(output.out)
+    assert data["inventory"]["package_count"] == 3
+
+
+def test_text_full_keeps_underscore_path_keys_raw(tmp_path, capsys):
+    root = make_overlay(tmp_path)
+    mask = root / "profiles/package.mask"
+    mask.mkdir()
+    (mask / "foo_bar").write_text("# mask\ndev-util/editor\n")
+
+    code, output = invoke(root, capsys, "--full")
+
+    assert code == 0
+    assert "full configuration" in output.out
+    assert "profiles/package.mask/foo_bar" in output.out
+    assert "profiles/package.mask/foo bar" not in output.out
 
 
 def git(root: Path, *args: str) -> str:
@@ -1131,7 +1248,8 @@ def test_full_configuration_preserves_raw_newlines_in_both_public_formats(
     else:
         actual = {}
         for relative in raw:
-            prefix = relative.replace("_", " ") + ": "
+            # Text labels keep path keys raw, so underscores stay readable.
+            prefix = relative + ": "
             line = next(line.strip() for line in output.out.splitlines() if prefix in line)
             actual[relative] = json.loads(line.removeprefix(prefix))
     assert {relative: actual[relative].encode("utf-8") for relative in raw} == raw

@@ -91,7 +91,8 @@ broken or unreadable. Inventory uses the existing `find_packages` and
 Hidden and reserved directories, including `deprecated`, do not contribute to
 inventory. A category counts only if it contains a discoverable package.
 Inventory includes masked packages and maintenance-excluded packages. Neither
-policy changes what exists on disk.
+policy changes what exists on disk. Category or package paths that resolve
+outside the checkout are an error, never permission to report external trees.
 
 Manifest fields reflect explicit `thin-manifests`, `sign-manifests`,
 `use-manifests`, `manifest-hashes` and `manifest-required-hashes` settings.
@@ -149,9 +150,14 @@ Success exits `0`. Invalid arguments, roots, configuration or policy exit `2`,
 print a diagnostic to stderr, and emit no partial context on stdout. The wrapper
 exits `127` if `uv` is missing; missing environment dependencies remain an
 explicit `uv` failure. Missing optional layout, profile EAPI or policy files
-remain distinguishable from malformed or unreadable files. Duplicate layout
+remain distinguishable from malformed or unreadable files. Non-regular
+configuration files, such as a FIFO or device at `profiles/repo_name` or
+`metadata/layout.conf`, fail fast instead of blocking the command. Duplicate layout
 keys and duplicate policy atoms fail rather than silently choosing a value.
-Malformed masks fail when requested with `--full`. Full mode scans every real
+Mask contents are reported as raw text and are not syntax-validated. Structural
+failures -- non-regular mask files, unreadable directories, and unreadable
+files -- exit `2` when requested with `--full`, with the failing path on stderr
+and no stdout. Full mode scans every real
 subdirectory of `profiles/package.mask` and reports its files in sorted order.
 Unreadable directories, including nested directories, and scan or file-stat
 errors exit `2` with the failing path on stderr and no stdout. Directory symlinks

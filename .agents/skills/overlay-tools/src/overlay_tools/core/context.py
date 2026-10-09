@@ -57,13 +57,26 @@ def section(items: list[Any], *, full: bool) -> dict[str, Any]:
 
 
 def read_optional(path: Path) -> str | None:
+    # Reject non-regular files before opening, so a FIFO or device at a
+    # configuration path fails quickly instead of blocking the command.
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError(f"Invalid configuration {path}: {exc}") from exc
+    if stat.S_ISLNK(mode):
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
+            raise ValueError(f"Invalid configuration {path}: broken symlink") from None
+        except OSError as exc:
+            raise ValueError(f"Invalid configuration {path}: {exc}") from exc
+    if not stat.S_ISREG(mode):
+        raise ValueError(f"Invalid configuration {path}: not a regular file")
     try:
         with path.open(encoding="utf-8", newline="") as stream:
             return stream.read()
-    except FileNotFoundError:
-        if path.is_symlink():
-            raise ValueError(f"Invalid configuration {path}: broken symlink") from None
-        return None
     except (OSError, UnicodeError) as exc:
         raise ValueError(f"Invalid configuration {path}: {exc}") from exc
 
@@ -284,6 +297,13 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
     if profile_eapi is not None and not re.fullmatch(r"[0-9]{1,3}", profile_eapi):
         raise ValueError(f"Invalid configuration {profile_eapi_path}: expected an EAPI number")
     packages = sorted(find_packages(root), key=lambda package: package.atom)
+    # Inventory must stay inside the checkout. find_packages follows category
+    # and package symlinks, so reject any discovered package whose resolved
+    # directory escapes the overlay root before reporting.
+    root_resolved = root.resolve()
+    for package in packages:
+        if not package.path.resolve().is_relative_to(root_resolved):
+            raise ValueError(f"Invalid overlay {root}: package {package.atom} escapes the checkout")
     eapis: Counter[str] = Counter()
     unresolved_eapis = 0
     categories: Counter[str] = Counter()

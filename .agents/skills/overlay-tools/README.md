@@ -163,7 +163,7 @@ overlay-tools/
 
 ## Checkout context
 
-Use `bin/overlay-info --overlay-path /path/to/checkout --json` to inspect current
+Use `.agents/skills/overlay-tools/bin/overlay-info --overlay-path /path/to/checkout --json` to inspect current
 inventory, policy, configuration and Git identity without a persistent cache.
 Read [the context guide](docs/overlay-info.md) for summary truncation, unchecked
 Git state and the opt-in `--full` configuration/mask dump. Provision the tools

@@ -178,7 +178,7 @@ Secrets, webhook registration, cron schedule, and state stay outside Git.
 ## Checkout context
 
 Before relying on package inventory or checkout identity, request
-`bin/overlay-info --overlay-path /path/to/checkout --json`. Read
+`.agents/skills/overlay-tools/bin/overlay-info --overlay-path /path/to/checkout --json`. Read
 [the context guide](docs/overlay-info.md) for bounded lists, truncation counts,
 unchecked Git state and opt-in `--full` masks/configuration. The command reads
 current files without a persistent cache and does not execute verification

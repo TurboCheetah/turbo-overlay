@@ -16,7 +16,11 @@ def render_text(context: dict[str, Any]) -> str:
     lines = ["Overlay context"]
 
     def append(label: str, value: Any, indent: int = 0) -> None:
-        prefix = "  " * indent + label.replace("_", " ")
+        # Only prettify fixed schema labels. Dynamic keys such as
+        # full_configuration paths must stay raw so the source file is
+        # identifiable, including underscore characters.
+        display = label if "/" in label else label.replace("_", " ")
+        prefix = "  " * indent + display
         if isinstance(value, dict) and {"items", "total", "truncated"} <= value.keys():
             lines.append(f"{prefix}: {value['total']} total, {value['truncated']} truncated")
             for item in value["items"]:
