@@ -92,7 +92,7 @@ ebuilds and Manifests; do not automatically uninstall existing packages.
 .agents/skills/overlay-tools/bin/update-ebuild -y -v 1.2.3 media-video/hayase-bin
 
 # With MY_PV mapping
-.agents/skills/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+.agents/skills/overlay-tools/bin/update-ebuild -y -v 0.2026.06.03.09.49_p00 -m "0.2026.06.03.09.49.stable_00" x11-terms/warp
 
 # Dry run
 .agents/skills/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord
@@ -111,13 +111,17 @@ ebuilds and Manifests; do not automatically uninstall existing packages.
 | `-s, --skip-git` | Skip git operations |
 | `-l, --lenient` | Allow non-standard version formats |
 | `-k, --keep-old` | Keep old ebuild |
-| `--skip-manifest` | Skip Manifest update (for CI) |
+| `--skip-manifest` | Skip Manifest update only with `--skip-git`; rejected for committing/PR runs |
 | `-y, --yes` | Auto-commit without prompting |
 | `--pr` | Create PR after committing (implies -y) |
 | `--base BRANCH` | Base branch for PR |
 | `--branch BRANCH` | Override feature branch name |
 | `--draft` | Create PR as draft |
 | `--upstream-url URL` | Upstream release URL for PR body |
+
+Normal bumps retain two previous non-live ebuilds plus the new version, three
+total. Live ebuilds are retained separately. `OVERLAY_TOOLS_KEEP_VERSIONS`
+overrides the total non-live retention count with a positive integer.
 
 ### test-ebuild
 

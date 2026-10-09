@@ -9,10 +9,9 @@ This file contains essential information for agentic coding agents working in th
 **turbo-overlay** - Gentoo overlay (package definitions for Portage)
 - Architecture: amd64
 - EAPI: 8 (all ebuilds)
-- Packages: 25 ebuilds across 9 unique packages in 5 categories
 - Master repository: gentoo
 
-Categories: dev-util (t3code-bin, t3code-nightly-bin, yaak-bin), media-video (hayase-bin, lossless-cut), net-im (goofcord), net-misc (ipinfo), x11-terms (warp)
+Read the tracked package directories for the current inventory rather than relying on a static package count. T3 desktop packages are retained for migration; `dev-util/t3code-openrc` is the maintained service adapter.
 
 ---
 
@@ -398,15 +397,15 @@ die "Fatal error description"  # Exit with error
 - Revision: `foo-1.1.ebuild` → `foo-1.1-r1.ebuild` (ebuild-only changes)
 
 ### Version Retention Policy
-**Keep at least 3 previous versions** of each package in the overlay.
+**Keep two previous non-live versions plus the new version, three total by default.** Live ebuilds are retained separately. `OVERLAY_TOOLS_KEEP_VERSIONS` overrides the total non-live retention count and must be a positive integer.
 
 When adding a new version:
 1. Add the new version ebuild
 2. Update the Manifest
-3. Only remove old versions if there are **4+ versions** already present
+3. If adding the new ebuild exceeds the configured total, remove the oldest non-live versions and their matching metadata-cache entries until the total is met
 4. Commit message format when dropping: `category/package: add X.Y.Z, drop A.B.C`
 
-This provides users with rollback options and stability.
+The default leaves two previous non-live ebuilds available for rollback.
 
 ---
 
