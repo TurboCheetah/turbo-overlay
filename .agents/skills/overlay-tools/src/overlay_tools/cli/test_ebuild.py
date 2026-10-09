@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from overlay_tools.core.ebuilds import parse_ebuild_filename
 from overlay_tools.core.errors import EbuildParseError, ExternalToolMissingError
 from overlay_tools.core.logging import Logger
 from overlay_tools.core.overlay import find_overlay_root
+from overlay_tools.core.staged_assertions import parse_specs
 from overlay_tools.core.subprocess_utils import require_tool, run
 
 # 1 is reserved for ebuild phase/assertion failures, so an environment that
@@ -22,6 +24,13 @@ CONTAINER_SCRIPT = "/usr/local/bin/run-ebuild"
 EBUILD_PATH = re.compile(r"^[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+\.ebuild$")
 STAGED_PATH = re.compile(r"^[A-Za-z0-9+_.-]+(/[A-Za-z0-9+_.-]+)*$")
 TOOLS_ROOT = Path(__file__).resolve().parents[3]
+ASSERTION_OPTIONS = {
+    "executable": "PATH",
+    "type": "TYPE:PATH",
+    "mode": "MODE:PATH",
+    "link-target": "PATH=TARGET",
+    "resolved-link": "PATH",
+}
 
 
 def bind_mount(src: Path, dst: str) -> str:
@@ -70,6 +79,13 @@ def main(argv: list[str] | None = None) -> int:
         metavar="STAGED_PATH",
         help="require a relative path in the Portage install image (repeatable)",
     )
+    for option, metavar in ASSERTION_OPTIONS.items():
+        parser.add_argument(f"--expect-{option}", action="append", default=[], metavar=metavar)
+    parser.add_argument(
+        "--package-checks",
+        action="store_true",
+        help="add builtin checks for this exact atom from metadata/test-assertions.json",
+    )
     args = parser.parse_args(argv)
     overlay = (args.overlay_path or find_overlay_root(TOOLS_ROOT) or TOOLS_ROOT).resolve()
     try:
@@ -77,11 +93,32 @@ def main(argv: list[str] | None = None) -> int:
         validate_ebuild(overlay, args.ebuild)
         for path in args.expect:
             validate_staged_path(path)
+        specs = [token for path in args.expect for token in ("--expect", path)]
+        # JSON avoids confusing a legacy filename such as --expect-mode with an option.
+        strong = any(path.startswith("--") for path in args.expect)
+        for option in ASSERTION_OPTIONS:
+            for value in getattr(args, f"expect_{option.replace('-', '_')}"):
+                specs.extend([f"--expect-{option}", value])
+                strong = True
+        if args.package_checks:
+            strong = True
+            specs.append("--package-checks")
+        checks = parse_specs(
+            specs, ebuild=args.ebuild, registry=overlay / "metadata/test-assertions.json"
+        )
+        runner_args = ["--", "--assertions-json", json.dumps(checks)] if strong else args.expect
         mounts = [
             bind_mount(overlay, CONTAINER_REPO),
             bind_mount(TOOLS_ROOT / "docker/run-ebuild", CONTAINER_SCRIPT),
         ]
-    except ValueError as exc:
+        if strong:
+            mounts.append(
+                bind_mount(
+                    TOOLS_ROOT / "src/overlay_tools/core/staged_assertions.py",
+                    "/usr/local/bin/staged-assertions.py",
+                )
+            )
+    except (ValueError, TypeError) as exc:
         parser.error(str(exc))
 
     log = Logger()
@@ -117,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         f"OVERLAY_REPO={CONTAINER_REPO}",
         DOCKER_TAG,
         args.ebuild,
-        *args.expect,
+        *runner_args,
     ]
     return run(cmd, check=False, capture=False).returncode
 

@@ -110,6 +110,16 @@ works on a real desktop; missing-library QA notices from a bare stage3 need
 confirmation after a full dependency install. Only test trusted ebuilds:
 Docker is not a sandbox for hostile package code.
 
+Strong staged checks are available through `--expect-executable`, `--expect-type`,
+`--expect-mode`, `--expect-link-target` and `--expect-resolved-link`. They inspect
+the install image without launching its payload; `--expect-resolved-link` follows
+links and resolves absolute targets inside that image, while `--expect-link-target`
+compares the stored link text. `--package-checks` adds only builtin assertions registered for
+the exact versioned atom in `metadata/test-assertions.json`. Read
+[the staged assertion guide](docs/staged-assertions.md) for validation, link
+semantics and registry policy. Legacy `--expect` keeps its final dangling-link
+presence behavior.
+
 ### Review new PRs
 
 The [PR autopilot](autopilot/README.md) contains the deployed review worker's
