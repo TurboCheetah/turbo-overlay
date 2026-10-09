@@ -65,11 +65,20 @@ choice, not detected architecture or proof of compatibility.
 ## Templates
 
 - `binary-direct` uses Portage's default archive unpacking for URL paths ending
-  in `.tar.gz`, `.tar.bz2`, `.tar.xz`, `.tgz`, or `.zip`. It renames the distfile
-  to `${P}` plus that suffix and assumes the binary is at `${WORKDIR}/NAME`.
-  Review the actual archive layout and adjust `S` or the install path.
-  Other URL paths are treated as a single binary, renamed `${P}.bin`, with
-  unpacking disabled. Do not select this template for an unsupported archive.
+  in `.tar.gz`, `.tar.bz2`, `.tar.xz`, `.tgz`, or `.zip`, even with a query string.
+  When the path has no supported suffix, it checks decoded `file` and `filename`
+  query values, including when other parameters follow them. Other query keys,
+  such as `token`, do not select unpacking. Conflicting filename hints cause
+  refusal. A supported path suffix takes precedence over query hints. The
+  original URL is always preserved byte-for-byte; decoding is only for hints.
+  These are filename heuristics, not verified content types. Check the artifact
+  yourself before using the starter. An archive gets `${P}` plus its suffix.
+  The initial `S="${WORKDIR}"` assumes a binary at `${WORKDIR}/NAME`; it does not
+  infer extracted directories. Set `S` and the binary path to the actual upstream
+  layout. `${WORKDIR}/${P}` is not universal, particularly for `-bin` package
+  names that differ from the upstream directory. Without a supported hint, the
+  download is treated as a single binary, renamed `${P}.bin`, with unpacking
+  disabled. Do not select this template for an unsupported archive.
 - `binary-deb` inherits `unpacker`, calls `unpacker_src_unpack`, and assumes
   a standalone `${WORKDIR}/usr/bin/NAME`. It does not copy the whole Debian
   filesystem or claim to supply Electron/browser packaging. Review `/opt`
@@ -99,8 +108,13 @@ This initial interface intentionally accepts a conservative subset:
 - URLs are literal canonical HTTPS URLs with lowercase DNS-style hosts. No
   credentials, port, fragment, Bash expansion, shell quotes, whitespace,
   control characters or dot path segments are accepted. Percent escapes must
-  decode to the same restricted character set. Use an exact release URL, not
-  `${PV}` interpolation.
+  decode to the same restricted character set. Use an immutable, release-specific
+  URL, not `${PV}` interpolation or a mutable latest-release endpoint. The tool
+  validates URL syntax only; neither a version string in the URL nor a
+  content-addressed-looking path proves immutability. Maintainers must review
+  upstream's release and retention policy. The offline creator cannot establish
+  whether the URL will keep serving the same bytes.
+  Literal `@@` sequences in URLs are preserved as data, never template syntax.
 - Descriptions are nonempty printable single-line text of at most 80 characters.
   Names are at most 120 characters. Bash substitutions, backslashes, semicolons,
   pipes and template markers are rejected. Apostrophes are Bash-quoted; XML text
@@ -114,7 +128,10 @@ This initial interface intentionally accepts a conservative subset:
   root or package subdirectory passed as the root fails closed.
 
 All input, target paths, template files and unresolved placeholders are checked
-before creating any directories. Writes use directory file descriptors and
+before creating any directories. Unknown or malformed markers in the original
+templates, including dangling `@@` prefixes, cause refusal. Substitution runs
+once over the original template and never scans inserted values for markers.
+Writes use directory file descriptors and
 no-follow opens. Files are created exclusively in a randomly named private
 staging directory. Linux `renameat2` with `RENAME_NOREPLACE` publishes the whole
 package at once. An existing or concurrently created target is never replaced,
@@ -151,8 +168,10 @@ refusal, `2` for argument errors, and `127` for an unprepared launcher environme
 
 ## Finish the package manually
 
-Before executing any ebuild phase, review the upstream artifact, extracted
-layout, command name, licensing, bundled components and dependencies. Add any
+Before executing any ebuild phase, confirm an immutable release-specific source
+with upstream and review the artifact type, extracted layout, command name,
+licensing, bundled components and dependencies. Set `S` and install paths to
+the actual upstream layout, not an assumed package-name directory. Add any
 required assets. Then, from the overlay root, adapt the printed commands:
 
 ```bash

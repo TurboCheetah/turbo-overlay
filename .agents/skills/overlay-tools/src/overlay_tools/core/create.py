@@ -12,7 +12,7 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 TEMPLATES = Path(__file__).resolve().parents[3] / "assets" / "templates"
@@ -176,11 +176,30 @@ def quote(value: str) -> str:
 
 def render_template(name: str, values: dict[str, str]) -> str:
     text = (TEMPLATES / name).read_text(encoding="utf-8")
-    for key, value in values.items():
-        text = text.replace(f"@@{key}@@", value)
-    if "@@" in text:
+    placeholder = re.compile(r"@@([A-Z][A-Z0-9_]*)@@")
+    # Validate only the original template. Inserted URL data may contain @@.
+    if "@@" in placeholder.sub("", text) or any(
+        match[1] not in values for match in placeholder.finditer(text)
+    ):
         raise ValueError(f"unresolved template placeholder in {name}")
-    return text
+    return placeholder.sub(lambda match: values[match[1]], text)
+
+
+def direct_suffix(url: str) -> str:
+    """Infer an unpacking hint, not content type, without changing the URL."""
+    endings = (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip")
+    parts = urlsplit(url)
+    path_suffix = next((ending for ending in endings if parts.path.endswith(ending)), None)
+    if path_suffix is not None:
+        return path_suffix
+    hints = {
+        next((ending for ending in endings if value.endswith(ending)), ".bin")
+        for key, value in parse_qsl(parts.query)
+        if key in {"file", "filename"}
+    }
+    if len(hints) > 1:
+        raise ValueError("conflicting archive filename hints; review the upstream URL manually")
+    return next(iter(hints), ".bin")
 
 
 def build_plan(
@@ -225,14 +244,7 @@ def build_plan(
         raise ValueError("keywords must be explicit space-separated architecture tokens")
     root = root.absolute()
     root_identity = validate_target(root, category, package)
-    suffix = next(
-        (
-            ending
-            for ending in (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip")
-            if urlsplit(upstream_url).path.endswith(ending)
-        ),
-        ".bin",
-    )
+    suffix = direct_suffix(upstream_url) if template == "binary-direct" else ".bin"
     archive = suffix != ".bin"
     values = {
         "DESCRIPTION": quote(description),
@@ -471,6 +483,8 @@ def report(plan: CreatePlan, *, written: bool = False) -> str:
     lines.extend(
         [
             "Not an installable package yet. Review trusted upstream layout and dependencies.",
+            "Review an immutable release-specific upstream URL; syntax cannot prove immutability.",
+            "URL suffixes are unpacking hints only; inspect artifact type and set S/binary path.",
             "Missing artifacts: Manifest, any required desktop/icon assets; cache not generated.",
             "Review license availability and redistribution rights; add dependencies and assets.",
             "Only after review, run these yourself from the overlay root:",

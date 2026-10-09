@@ -49,13 +49,16 @@ def test_entropy_failure_leaves_no_open_descriptors_or_artifacts(overlay, capsys
     import os
     import secrets
 
+    from overlay_tools.cli.create_ebuild import main
+
+    # Count invocation-owned FDs, not ctypes' retained libffi FD on Python 3.14.
     before = set(os.listdir("/proc/self/fd"))
 
     def unavailable_entropy(_size):
         raise OSError("entropy source unavailable")
 
     monkeypatch.setattr(secrets, "token_hex", unavailable_entropy)
-    assert invoke(arguments(overlay, "--write")) == 1
+    assert main(arguments(overlay, "--write")) == 1
     captured = capsys.readouterr()
     assert "entropy source unavailable" in captured.err
     assert not captured.out
@@ -82,6 +85,68 @@ def test_default_preview_renders_both_artifacts_without_creating_category(overla
     assert "Manifest" in output
     assert "pkgcheck scan -f latest dev-util/example-bin" in output
     assert not (overlay / "dev-util").exists()
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.org/latest",
+        "https://example.org/download?version=1.2.3",
+        "https://cdn.example.org/sha256/abcdef",
+    ],
+)
+def test_offline_creator_requires_manual_immutability_and_archive_layout_review(
+    overlay, capsys, mode, url
+):
+    assert invoke(arguments(overlay, mode, "--upstream-url", url)) == 0
+    output = capsys.readouterr().out
+    assert (
+        "Review an immutable release-specific upstream URL; syntax cannot prove immutability."
+        in output
+    )
+    assert f'SRC_URI="{url} -> ${{P}}.bin"' in output
+    assert (
+        '# TODO: for archives, set S to the actual upstream extraction directory.\nS="${WORKDIR}"'
+        in output
+    )
+    if mode == "--dry-run":
+        assert not (overlay / "dev-util").exists()
+
+
+def test_creator_readme_lists_required_inputs_and_guide_example_previews_without_writes(
+    overlay, tmp_path
+):
+    import shlex
+    import subprocess
+
+    tools = Path(__file__).resolve().parents[1]
+    readme = (tools / "README.md").read_text()
+    for required in [
+        "category/package",
+        "--overlay-path",
+        "--version",
+        "--template",
+        "--upstream-url",
+        "--license",
+        "--description",
+        "--homepage",
+        "--maintainer-email",
+    ]:
+        assert f"`{required}`" in readme
+    guide = (tools / "docs/create-ebuild.md").read_text()
+    block = next(
+        part
+        for part in guide.split("```bash\n")[1:]
+        if part.startswith(".agents/skills/overlay-tools/bin/create-ebuild")
+    )
+    command = shlex.split(block.split("```", 1)[0].replace("\\\n", ""))
+    command[0] = str(tools / "bin/create-ebuild")
+    command[command.index("--overlay-path") + 1] = str(overlay)
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "Preview only" in result.stdout
+    assert sorted(path.name for path in overlay.iterdir()) == ["metadata", "profiles"]
 
 
 @pytest.mark.parametrize("keywords", ["", "~arm64", "~amd64 ~arm64"])
@@ -197,6 +262,60 @@ def test_symlink_targets_or_parents_cannot_escape(overlay, tmp_path, location):
         root = link / "overlay"
     assert invoke(arguments(root, "--write")) == 1
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize(
+    "url,suffix",
+    [
+        ("https://example.org/tool.tar.gz?token=abc", ".tar.gz"),
+        ("https://example.org/tool.tar.gz?filename=ignored.zip&file=ignored", ".tar.gz"),
+        ("https://example.org/download?file=tool.tar.gz", ".tar.gz"),
+        ("https://example.org/download?filename=tool.tar.xz&token=abc", ".tar.xz"),
+        ("https://example.org/download?token=abc&file=tool%2Etar%2Ebz2", ".tar.bz2"),
+        ("https://example.org/download?file=tool.tgz&filename=tool.tgz", ".tgz"),
+        ("https://example.org/download?filename=tool.zip", ".zip"),
+        ("https://example.org/tool?token=archive.tar.gz", ".bin"),
+        ("https://example.org/tool?filename=tool", ".bin"),
+    ],
+)
+def test_direct_archive_query_hints_preserve_literal_url_without_fetching(
+    overlay, capsys, monkeypatch, mode, url, suffix
+):
+    import socket
+    import subprocess
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unexpected network or process execution")
+
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    assert invoke(arguments(overlay, mode, "--upstream-url", url)) == 0
+    output = capsys.readouterr().out
+    assert f'SRC_URI="{url} -> ${{P}}{suffix}"' in output
+    assert ("src_unpack() { :; }" in output) == (suffix == ".bin")
+    if mode == "--write":
+        text = (overlay / "dev-util/example-bin/example-bin-1.2.3.ebuild").read_text()
+        assert f'SRC_URI="{url} -> ${{P}}{suffix}"' in text
+        assert ("src_unpack() { :; }" in text) == (suffix == ".bin")
+    else:
+        assert not (overlay / "dev-util").exists()
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize(
+    "query",
+    ["file=tool.tar.gz&filename=tool.zip", "file=tool&filename=tool.tar.gz"],
+)
+def test_conflicting_direct_archive_query_hints_fail_before_writes(overlay, capsys, mode, query):
+    assert (
+        invoke(arguments(overlay, mode, "--upstream-url", f"https://example.org/download?{query}"))
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert "conflicting archive filename hints" in captured.err
+    assert not captured.out
+    assert not (overlay / "dev-util").exists()
 
 
 @pytest.mark.parametrize(
@@ -1325,16 +1444,53 @@ def test_io_failure_opening_new_category_cleans_the_empty_owned_directory(overla
     assert not (overlay / "dev-util").exists()
 
 
-def test_unknown_template_placeholders_fail_before_category_creation(overlay, monkeypatch):
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize("field", ["--upstream-url", "--homepage"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.org/@@BINARY_NAME@@",
+        "https://example.org/@@HOMEPAGE@@/@@UNKNOWN@@/@@",
+    ],
+)
+def test_url_template_markers_remain_literal_in_preview_and_write(
+    overlay, capsys, mode, field, url
+):
+    args = arguments(overlay, mode, field, url)
+    assert invoke(args) == 0
+    output = capsys.readouterr().out
+    expected = (
+        f'SRC_URI="{url} -> ${{P}}.bin"' if field == "--upstream-url" else f"HOMEPAGE='{url}'"
+    )
+    assert expected in output
+    if mode == "--write":
+        ebuild = overlay / "dev-util/example-bin/example-bin-1.2.3.ebuild"
+        assert expected in ebuild.read_text()
+        assert sorted(p.name for p in ebuild.parent.iterdir()) == [ebuild.name, "metadata.xml"]
+    else:
+        assert not (overlay / "dev-util").exists()
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize("filename", ["binary-direct.ebuild.in", "metadata.xml.in"])
+@pytest.mark.parametrize(
+    "marker", ["@@UNKNOWN@@", "@@BINARY_NAME", "@@", "@@binary_name@@", "@@BAD-NAME@@"]
+)
+def test_invalid_template_placeholders_fail_before_category_creation(
+    overlay, monkeypatch, capsys, mode, filename, marker
+):
     real_read = Path.read_text
 
     def unresolved(path, *args, **kwargs):
         content = real_read(path, *args, **kwargs)
-        return content + "@@UNKNOWN@@" if path.name == "binary-direct.ebuild.in" else content
+        return content + marker if path.name == filename else content
 
     monkeypatch.setattr(Path, "read_text", unresolved)
-    assert invoke(arguments(overlay, "--write")) == 1
-    assert not (overlay / "dev-util").exists()
+    assert invoke(arguments(overlay, mode)) == 1
+    captured = capsys.readouterr()
+    assert f"unresolved template placeholder in {filename}" in captured.err
+    assert not captured.out
+    assert sorted(path.name for path in overlay.iterdir()) == ["metadata", "profiles"]
 
 
 def test_dangling_category_and_metadata_symlinks_fail_closed(overlay, tmp_path):

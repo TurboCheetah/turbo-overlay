@@ -7,6 +7,7 @@ EAPI=8
 DESCRIPTION=@@DESCRIPTION@@
 HOMEPAGE=@@HOMEPAGE@@
 SRC_URI="@@UPSTREAM_URL@@ -> ${P}@@SUFFIX@@"
+# TODO: for archives, set S to the actual upstream extraction directory.
 S="${WORKDIR}"
 
 LICENSE=@@LICENSE@@
