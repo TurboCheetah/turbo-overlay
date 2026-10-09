@@ -112,8 +112,9 @@ Docker is not a sandbox for hostile package code.
 
 Strong staged checks are available through `--expect-executable`, `--expect-type`,
 `--expect-mode`, `--expect-link-target` and `--expect-resolved-link`. They inspect
-the install image without launching its payload. Absolute link targets resolve
-inside that image. `--package-checks` adds only builtin assertions registered for
+the install image without launching its payload; `--expect-resolved-link` follows
+links and resolves absolute targets inside that image, while `--expect-link-target`
+compares the stored link text. `--package-checks` adds only builtin assertions registered for
 the exact versioned atom in `metadata/test-assertions.json`. Read
 [the staged assertion guide](docs/staged-assertions.md) for validation, link
 semantics and registry policy. Legacy `--expect` keeps its final dangling-link
