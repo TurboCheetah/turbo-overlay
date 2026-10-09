@@ -5,6 +5,7 @@ set -euo pipefail
 # inside this disposable container, not on the maintainer's Gentoo system.
 
 usage="usage: run-ebuild category/package/package-version.ebuild [staged-path ...]"
+usage+=" [--expect-* SPEC] [--package-checks]"
 name_chars='[a-zA-Z0-9+_.-]+'
 
 valid_ebuild_path() {
@@ -87,11 +88,18 @@ install_build_deps() {
 main() {
     [[ $# -ge 1 ]] || { echo "${usage}" >&2; exit 2; }
     [[ -n ${OVERLAY_REPO:-} ]] || { echo "OVERLAY_REPO must name the mounted overlay" >&2; exit 2; }
-    local path=${1} repo=${OVERLAY_REPO} expected image name repo_path pf
+    local path=${1} repo=${OVERLAY_REPO} expected image name repo_path pf checks='' helper
     shift
 
     valid_ebuild_path "${path}" || { echo "Invalid ebuild path: ${path}" >&2; exit 2; }
+    helper=${BASH_SOURCE[0]%/*}/staged-assertions.py
+    [[ -f ${helper} ]] || helper=${BASH_SOURCE[0]%/*}/../src/overlay_tools/core/staged_assertions.py
     for expected in "$@"; do
+        if [[ ${expected} == --* ]]; then
+            checks=$(python3 "${helper}" validate --ebuild "${path}" \
+                --registry "${repo}/metadata/test-assertions.json" -- "$@") || exit 2
+            break
+        fi
         valid_staged_path "${expected}" \
             || { echo "Invalid staged path: ${expected}" >&2; exit 2; }
     done
@@ -129,13 +137,17 @@ main() {
         || { echo "Portage phases failed: ${path}" >&2; exit 1; }
 
     [[ -d ${image} ]] || { echo "Missing Portage install image: ${image}" >&2; exit 1; }
-    for expected in "$@"; do
-        if ! staged_path_exists "${image}" "${expected}"; then
-            echo "Missing staged path: ${expected}" >&2
-            exit 1
-        fi
-        printf 'OK: staged %s\n' "${expected}"
-    done
+    if [[ -n ${checks} ]]; then
+        python3 "${helper}" check --image "${image}" --assertions-json "${checks}" || exit $?
+    else
+        for expected in "$@"; do
+            if ! staged_path_exists "${image}" "${expected}"; then
+                echo "Missing staged path: ${expected}" >&2
+                exit 1
+            fi
+            printf 'OK: staged %s\n' "${expected}"
+        done
+    fi
     printf 'PASS: Portage phases completed; install image at %s\n' "${image}"
 }
 

@@ -162,6 +162,14 @@ failure (repos.conf, overlay registration), `127` = `uv` is not installed. Other
 non-zero codes come from `docker run` itself (e.g. `137` if the container is
 killed).
 
+For executable permissions, entry types, exact modes, stored link text or
+image-rooted resolved links, read
+[the staged assertion guide](docs/staged-assertions.md). Add `--package-checks`
+only when the exact versioned atom has reviewed builtin assertions in
+`metadata/test-assertions.json`. It does not discover or execute repository
+scripts. These checks never launch staged payloads and do not change legacy
+`--expect` final dangling-link presence semantics.
+
 ### Review new PRs
 
 The [PR autopilot](autopilot/README.md) holds the webhook filter, stable-state
