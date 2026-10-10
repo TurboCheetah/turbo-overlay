@@ -91,7 +91,8 @@ def read_marker(root_fd: int, root: Path, directory: str, filename: str) -> str:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ValueError("overlay markers must be regular files")
         marker = os.fdopen(fd, "r", encoding="utf-8")
-        return marker.read(4096)
+        # Validate the complete marker, not a prefix that can hide an invalid tail.
+        return marker.read(-1)
     finally:
         if marker is None:
             if fd is not None:

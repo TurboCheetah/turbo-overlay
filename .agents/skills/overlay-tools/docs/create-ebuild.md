@@ -140,6 +140,15 @@ transfer to a text reader. This rejects a FIFO replacement without waiting for a
 writer. The precheck is not atomic with open and cannot prevent open-time effects
 if a hostile writer replaces a regular marker with a device in between.
 
+Both markers are read to EOF as strict UTF-8 before preview or writes. The creator
+checks the complete repository name after removing trailing newlines; it does not
+parse `layout.conf` settings. Invalid characters anywhere in `repo_name` and
+invalid UTF-8 anywhere in either marker cause refusal, including tails beyond
+4096 characters.
+There is no marker-size cap. Valid long markers remain accepted, and reading them
+uses memory and I/O proportional to their full size. Keep these files in the
+trusted checkout small; do not use this reader for untrusted oversized inputs.
+
 All input, target paths, template files and unresolved placeholders are checked
 before creating any directories. Unknown or malformed markers in the original
 templates, including dangling `@@` prefixes, cause refusal. Substitution runs

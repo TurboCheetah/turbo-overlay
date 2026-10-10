@@ -1433,6 +1433,194 @@ def test_validation_descriptor_close_errors_preserve_failure_and_other_owners(
 
 @pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
 @pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize("character_count", [4095, 4096, 4097, 16384])
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_marker_complete_valid_text_accepts_long_names_and_multibyte_layouts(
+    overlay, capsys, marker_name, mode, character_count, newline
+):
+    import os
+
+    marker_path = overlay / marker_name
+    if marker_name == "profiles/repo_name":
+        text = "a" * (character_count - 1) + newline
+    else:
+        text = "masters = gentoo\n#"
+        text += "é" * (character_count - len(text) - 1) + "\n"
+        text = text.replace("\n", newline)
+    assert len(text.replace("\r\n", "\n")) == character_count
+    marker_path.write_text(text, encoding="utf-8")
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+
+    assert invoke(arguments(overlay, mode)) == 0
+    captured = capsys.readouterr()
+    assert not captured.err
+    expected = ["metadata", "metadata/layout.conf", "profiles", "profiles/repo_name"]
+    if mode == "--dry-run":
+        assert "Preview only" in captured.out
+    else:
+        assert "Written starter only" in captured.out
+        expected.extend(
+            [
+                "dev-util",
+                "dev-util/example-bin",
+                "dev-util/example-bin/example-bin-1.2.3.ebuild",
+                "dev-util/example-bin/metadata.xml",
+            ]
+        )
+        assert (
+            "DESCRIPTION='Example binary tool'"
+            in (overlay / "dev-util/example-bin/example-bin-1.2.3.ebuild").read_text()
+        )
+        assert (
+            "<email>owner@example.org</email>"
+            in (overlay / "dev-util/example-bin/metadata.xml").read_text()
+        )
+    assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == sorted(expected)
+    for path, content in before.items():
+        assert (overlay / path).read_bytes() == content
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize("close_errno", ["EIO", "EINTR"])
+def test_marker_utf8_tail_error_survives_close_failure_and_descriptor_reuse(
+    overlay, tmp_path, monkeypatch, capsys, marker_name, mode, close_errno
+):
+    import errno
+    import os
+
+    marker_path = overlay / marker_name
+    marker_path.write_bytes(b"a" * 16384 + b"\xff\n")
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+    real_fdopen, real_open, real_close = os.fdopen, os.open, os.close
+    close_attempts = 0
+    sentinel_fd = None
+
+    class Marker:
+        def __init__(self, source):
+            self.source = source
+
+        def read(self, count=-1):
+            return self.source.read(count)
+
+        def close(self):
+            nonlocal close_attempts, sentinel_fd
+            close_attempts += 1
+            fd = self.source.fileno()
+            self.source.close()
+            sentinel_fd = real_open(tmp_path / "sentinel", os.O_CREAT | os.O_RDWR, 0o600)
+            if sentinel_fd != fd:
+                os.dup2(sentinel_fd, fd)
+                real_close(sentinel_fd)
+                sentinel_fd = fd
+            raise OSError(getattr(errno, close_errno), "secondary marker tail close failure")
+
+    def tracked_fdopen(fd, *args, **kwargs):
+        source = real_fdopen(fd, *args, **kwargs)
+        if os.readlink(f"/proc/self/fd/{fd}") == str(marker_path):
+            return Marker(source)
+        return source
+
+    monkeypatch.setattr(os, "fdopen", tracked_fdopen)
+    try:
+        assert invoke(arguments(overlay, mode)) == 1
+        captured = capsys.readouterr()
+        assert "utf-8" in captured.err
+        assert "invalid start byte" in captured.err
+        assert "secondary marker tail close failure" in captured.err
+        assert f"{marker_path}: close failed:" in captured.err
+        assert "descriptor state uncertain; not retried" in captured.err
+        assert "cleanup incomplete" in captured.err
+        assert close_attempts == 1
+        assert sentinel_fd is not None
+        os.fstat(sentinel_fd)
+        assert not captured.out
+        assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == [
+            "metadata",
+            "metadata/layout.conf",
+            "profiles",
+            "profiles/repo_name",
+        ]
+        assert {
+            p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+        } == before
+        for entry in Path("/proc/self/fd").iterdir():
+            with suppress(FileNotFoundError):
+                assert not os.readlink(entry).startswith(str(overlay))
+    finally:
+        if sentinel_fd is not None:
+            with suppress(OSError):
+                real_close(sentinel_fd)
+        for entry in Path("/proc/self/fd").iterdir():
+            with suppress(FileNotFoundError):
+                if os.readlink(entry).startswith(str(overlay)):
+                    real_close(int(entry.name))
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+def test_marker_invalid_utf8_tail_refuses_without_artifacts_or_leaks(
+    overlay, capsys, marker_name, mode
+):
+    import os
+
+    marker_path = overlay / marker_name
+    # Beyond both the old character limit and TextIOWrapper's decoder read-ahead.
+    marker_path.write_bytes(b"a" * 16384 + b"\xff\n")
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+
+    assert invoke(arguments(overlay, mode)) == 1
+    captured = capsys.readouterr()
+    assert "utf-8" in captured.err
+    assert "invalid start byte" in captured.err
+    assert not captured.out
+    assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == [
+        "metadata",
+        "metadata/layout.conf",
+        "profiles",
+        "profiles/repo_name",
+    ]
+    assert {
+        p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+    } == before
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+def test_marker_invalid_repository_name_tail_refuses_without_artifacts_or_leaks(
+    overlay, capsys, mode
+):
+    import os
+
+    marker_path = overlay / "profiles/repo_name"
+    marker_path.write_bytes(b"a" * 4096 + b"/unchecked-tail\n")
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+
+    assert invoke(arguments(overlay, mode)) == 1
+    captured = capsys.readouterr()
+    assert "overlay needs a valid profiles/repo_name" in captured.err
+    assert not captured.out
+    assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == [
+        "metadata",
+        "metadata/layout.conf",
+        "profiles",
+        "profiles/repo_name",
+    ]
+    assert {
+        p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+    } == before
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
 @pytest.mark.parametrize(
     "file_type", ["S_IFCHR", "S_IFBLK", "S_IFSOCK", "S_IFIFO", "S_IFDIR", "S_IFLNK"]
 )
