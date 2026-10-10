@@ -499,7 +499,9 @@ def test_category_rmdir_enotempty_preserves_entry_and_diagnoses_residual(
 
     def failing_rmdir(path, *, dir_fd=None, **kwargs):
         if path == "dev-util":
-            # Simulate a concurrent writer's entry surviving the cleanup.
+            # Simulate a concurrent writer's entry arriving right before our
+            # cleanup rmdir, forcing ENOTEMPTY with a real residual entry.
+            (category / "unrelated").write_text("other writer")
             raise OSError(errno.ENOTEMPTY, "directory not empty")
         return real_rmdir(path, dir_fd=dir_fd, **kwargs)
 
@@ -508,7 +510,11 @@ def test_category_rmdir_enotempty_preserves_entry_and_diagnoses_residual(
     assert invoke(arguments(overlay, "--write")) == 1
     captured = capsys.readouterr()
     assert "not empty; residual entries left untouched" in captured.err
+    # The diagnostic lists the actual absolute residual path, not a vague
+    # "residual entries" placeholder.
+    assert str(category / "unrelated") in captured.err
     assert category.exists()
+    assert (category / "unrelated").read_text() == "other writer"
 
 
 def test_publish_fsyncs_the_category_directory(overlay, monkeypatch, capsys):
@@ -531,6 +537,102 @@ def test_publish_fsyncs_the_category_directory(overlay, monkeypatch, capsys):
     paths = [path for _, path in fsynced]
     # Staged-dir entry and publish rename each sync the category directory.
     assert sum(path.endswith("dev-util") for path in paths) == 2
+
+
+@pytest.mark.parametrize("existing_category", [False, True])
+def test_postpublish_fsync_failure_rolls_back_published_package(
+    overlay, monkeypatch, capsys, existing_category
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    target = category / "example-bin"
+    if existing_category:
+        category.mkdir()
+        (category / "unrelated").write_text("other writer")
+    real_fsync = os.fsync
+    failed_once = False
+
+    def failing_fsync(fd):
+        nonlocal failed_once
+        try:
+            path = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            path = "?"
+        # The rename has already published the entry when the category
+        # durability sync at publish runs; simulate that sync failing.
+        if path.endswith("dev-util") and target.exists() and not failed_once:
+            failed_once = True
+            raise OSError(errno.EIO, "simulated post-publish fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", failing_fsync)
+    assert invoke(arguments(overlay, "--write")) == 1
+    assert failed_once
+    captured = capsys.readouterr()
+    assert "simulated post-publish fsync failure" in captured.err
+    assert "Written starter" not in captured.out
+    # Ownership was recorded under the published name, so rollback removes
+    # the published entry instead of leaving an empty package directory.
+    assert not target.exists()
+    if existing_category:
+        assert [p.name for p in category.iterdir()] == ["unrelated"]
+        assert (category / "unrelated").read_text() == "other writer"
+    else:
+        assert not category.exists()
+    # The failed sync leaves a clean, retryable state.
+    assert invoke(arguments(overlay, "--write")) == 0
+    assert "Written starter only" in capsys.readouterr().out
+    assert sorted(p.name for p in target.iterdir()) == [
+        "example-bin-1.2.3.ebuild",
+        "metadata.xml",
+    ]
+
+
+@pytest.mark.parametrize("existing_category", [False, True])
+def test_rollback_sync_failure_names_synced_category_not_removed_child(
+    overlay, monkeypatch, capsys, existing_category
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    target = category / "example-bin"
+    if existing_category:
+        category.mkdir()
+        (category / "unrelated").write_text("other writer")
+    real_fsync = os.fsync
+    category_fsyncs = 0
+
+    def failing_fsync(fd):
+        nonlocal category_fsyncs
+        try:
+            path = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            path = "?"
+        if path.endswith("dev-util"):
+            category_fsyncs += 1
+            # Sync #1 durably records the staged entry; #2 is the publish
+            # rename sync and #3 the rollback sync after the rmdir.
+            if category_fsyncs in (2, 3):
+                raise OSError(errno.EIO, "simulated rollback fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", failing_fsync)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert "simulated rollback fsync failure" in captured.err
+    # After the child entry is already removed, the failing sync diagnostic
+    # names the directory whose durable change mattered (the category), not
+    # the removed child path.
+    assert "rollback fsync failed" in captured.err
+    assert str(category) in captured.err
+    assert not target.exists()
+    if existing_category:
+        assert [p.name for p in category.iterdir()] == ["unrelated"]
+    else:
+        assert not category.exists()
 
 
 @pytest.mark.parametrize("close_at", ["stage", "category", "root", "scan"])
