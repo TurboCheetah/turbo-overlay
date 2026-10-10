@@ -132,6 +132,14 @@ This initial interface intentionally accepts a conservative subset:
   category, package target and marker files must not be symlinks. A nonexistent
   root or package subdirectory passed as the root fails closed.
 
+Marker reads first check the entry's type relative to its open directory without
+following symlinks. Existing devices, sockets, FIFOs, directories and symlinks
+are refused before opening the marker. The subsequent open retains `O_NOFOLLOW`
+and `O_NONBLOCK`, and its descriptor must pass a second regular-file check before
+transfer to a text reader. This rejects a FIFO replacement without waiting for a
+writer. The precheck is not atomic with open and cannot prevent open-time effects
+if a hostile writer replaces a regular marker with a device in between.
+
 All input, target paths, template files and unresolved placeholders are checked
 before creating any directories. Unknown or malformed markers in the original
 templates, including dangling `@@` prefixes, cause refusal. Substitution runs

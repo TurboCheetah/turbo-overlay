@@ -82,15 +82,20 @@ def read_marker(root_fd: int, root: Path, directory: str, filename: str) -> str:
     marker = None
     marker_path = root / directory / filename
     try:
-        fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
-        marker = os.fdopen(fd, "r", encoding="utf-8")
-        if not stat.S_ISREG(os.fstat(marker.fileno()).st_mode):
+        # Reject existing devices and other nonregular entries before opening them.
+        info = os.stat(filename, dir_fd=directory_fd, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode):
             raise ValueError("overlay markers must be regular files")
+        fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        # The entry can change after stat. Check the opened FD before fdopen owns it.
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("overlay markers must be regular files")
+        marker = os.fdopen(fd, "r", encoding="utf-8")
         return marker.read(4096)
     finally:
         if marker is None:
             if fd is not None:
-                # fdopen did not take ownership. No file object can close it.
+                # Validation or fdopen failed before a file object took ownership.
                 cleanup_close(fd, marker_path, errors)
         else:
             try:

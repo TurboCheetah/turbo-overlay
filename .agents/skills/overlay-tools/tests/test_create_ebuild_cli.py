@@ -1432,6 +1432,291 @@ def test_validation_descriptor_close_errors_preserve_failure_and_other_owners(
 
 
 @pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize(
+    "file_type", ["S_IFCHR", "S_IFBLK", "S_IFSOCK", "S_IFIFO", "S_IFDIR", "S_IFLNK"]
+)
+def test_nonregular_markers_are_rejected_without_opening_them(
+    overlay, monkeypatch, capsys, marker_name, mode, file_type
+):
+    import os
+    import stat
+
+    marker_path = overlay / marker_name
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+    real_stat, real_open = os.stat, os.open
+    inspected = []
+    opened = []
+
+    def is_marker(path, kwargs):
+        directory_fd = kwargs.get("dir_fd")
+        return (
+            path == marker_path.name
+            and directory_fd is not None
+            and os.readlink(f"/proc/self/fd/{directory_fd}") == str(marker_path.parent)
+        )
+
+    def nonregular_stat(path, *args, **kwargs):
+        info = real_stat(path, *args, **kwargs)
+        if is_marker(path, kwargs):
+            inspected.append(kwargs.get("follow_symlinks"))
+            values = list(info)
+            values[0] = getattr(stat, file_type) | 0o600
+            return os.stat_result(values)
+        return info
+
+    def guarded_open(path, flags, *args, **kwargs):
+        if is_marker(path, kwargs):
+            opened.append(path)
+            # Never open a real device, even on a failing regression run.
+            raise OSError("nonregular marker open attempted")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", nonregular_stat)
+    monkeypatch.setattr(os, "open", guarded_open)
+    assert invoke(arguments(overlay, mode)) == 1
+    captured = capsys.readouterr()
+    assert opened == [], "nonregular marker must be refused before os.open"
+    assert inspected == [False], (
+        "inspect the marker relative to its directory without following links"
+    )
+    assert "overlay markers must be regular files" in captured.err
+    assert not captured.out
+    assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == [
+        "metadata",
+        "metadata/layout.conf",
+        "profiles",
+        "profiles/repo_name",
+    ]
+    assert {
+        p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+    } == before
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize("close_errno", [None, "EIO", "EINTR"])
+def test_marker_replaced_by_fifo_is_checked_before_fdopen_and_closed_once(
+    overlay, tmp_path, monkeypatch, capsys, marker_name, mode, close_errno
+):
+    import errno
+    import os
+    import stat
+
+    marker_path = overlay / marker_name
+    real_stat, real_open, real_fstat = os.stat, os.open, os.fstat
+    real_fdopen, real_close = os.fdopen, os.close
+    events = []
+    marker_fd = None
+    sentinel_fd = None
+
+    def replaced_stat(path, *args, **kwargs):
+        info = real_stat(path, *args, **kwargs)
+        directory_fd = kwargs.get("dir_fd")
+        if (
+            path == marker_path.name
+            and directory_fd is not None
+            and os.readlink(f"/proc/self/fd/{directory_fd}") == str(marker_path.parent)
+        ):
+            assert kwargs.get("follow_symlinks") is False
+            assert stat.S_ISREG(info.st_mode)
+            events.append("stat")
+            marker_path.unlink()
+            os.mkfifo(marker_path, 0o600)
+        return info
+
+    def tracked_open(path, flags, *args, **kwargs):
+        nonlocal marker_fd
+        directory_fd = kwargs.get("dir_fd")
+        if (
+            path == marker_path.name
+            and directory_fd is not None
+            and os.readlink(f"/proc/self/fd/{directory_fd}") == str(marker_path.parent)
+        ):
+            # Assert before a real FIFO open so regressions cannot block the test.
+            assert flags & os.O_NONBLOCK
+            assert flags & os.O_NOFOLLOW
+            assert events == ["stat"]
+            events.append("open")
+            marker_fd = real_open(path, flags, *args, **kwargs)
+            return marker_fd
+        return real_open(path, flags, *args, **kwargs)
+
+    def tracked_fstat(fd):
+        info = real_fstat(fd)
+        if fd == marker_fd:
+            assert stat.S_ISFIFO(info.st_mode)
+            events.append("fstat")
+        return info
+
+    def guarded_fdopen(fd, *args, **kwargs):
+        if fd == marker_fd:
+            events.append("fdopen")
+            raise OSError("nonregular descriptor reached fdopen")
+        return real_fdopen(fd, *args, **kwargs)
+
+    def tracked_close(fd):
+        nonlocal sentinel_fd
+        if fd == marker_fd:
+            events.append("close")
+            real_close(fd)
+            if close_errno is not None:
+                sentinel_fd = real_open(tmp_path / "sentinel", os.O_CREAT | os.O_RDWR, 0o600)
+                if sentinel_fd != fd:
+                    os.dup2(sentinel_fd, fd)
+                    real_close(sentinel_fd)
+                    sentinel_fd = fd
+                raise OSError(getattr(errno, close_errno), "secondary FIFO close failure")
+        else:
+            real_close(fd)
+
+    monkeypatch.setattr(os, "stat", replaced_stat)
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "fstat", tracked_fstat)
+    monkeypatch.setattr(os, "fdopen", guarded_fdopen)
+    monkeypatch.setattr(os, "close", tracked_close)
+    try:
+        assert invoke(arguments(overlay, mode)) == 1
+        captured = capsys.readouterr()
+        assert "overlay markers must be regular files" in captured.err
+        assert events == ["stat", "open", "fstat", "close"]
+        assert marker_fd is not None
+        assert not captured.out
+        if close_errno is not None:
+            assert sentinel_fd is not None
+            assert "secondary FIFO close failure" in captured.err
+            assert f"{marker_path}: close failed:" in captured.err
+            assert "descriptor state uncertain; not retried" in captured.err
+            assert sentinel_fd == marker_fd
+            real_fstat(sentinel_fd)
+        else:
+            assert "cleanup incomplete" not in captured.err
+            with pytest.raises(OSError) as exc:
+                real_fstat(marker_fd)
+            assert exc.value.errno == errno.EBADF
+        assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == [
+            "metadata",
+            "metadata/layout.conf",
+            "profiles",
+            "profiles/repo_name",
+        ]
+        assert stat.S_ISFIFO(marker_path.lstat().st_mode)
+        other_name = (
+            "metadata/layout.conf" if marker_name == "profiles/repo_name" else "profiles/repo_name"
+        )
+        expected = "masters = gentoo\n" if marker_name == "profiles/repo_name" else "test-overlay\n"
+        assert (overlay / other_name).read_text() == expected
+        for entry in Path("/proc/self/fd").iterdir():
+            with suppress(FileNotFoundError):
+                assert not os.readlink(entry).startswith(str(overlay))
+    finally:
+        if sentinel_fd is not None:
+            with suppress(OSError):
+                real_close(sentinel_fd)
+        for entry in Path("/proc/self/fd").iterdir():
+            with suppress(FileNotFoundError):
+                if os.readlink(entry).startswith(str(overlay)):
+                    real_close(int(entry.name))
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+@pytest.mark.parametrize("stat_errno", ["ENOENT", "EACCES", "EIO"])
+def test_marker_precheck_errors_refuse_without_opening_or_artifacts(
+    overlay, monkeypatch, capsys, marker_name, mode, stat_errno
+):
+    import errno
+    import os
+
+    marker_path = overlay / marker_name
+    before = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+    real_stat, real_open = os.stat, os.open
+    inspected = []
+    opened = []
+
+    def is_marker(path, kwargs):
+        fd = kwargs.get("dir_fd")
+        return (
+            path == marker_path.name
+            and fd is not None
+            and os.readlink(f"/proc/self/fd/{fd}") == str(marker_path.parent)
+        )
+
+    def failed_stat(path, *args, **kwargs):
+        if is_marker(path, kwargs):
+            inspected.append(kwargs.get("follow_symlinks"))
+            raise OSError(getattr(errno, stat_errno), "original marker precheck failure")
+        return real_stat(path, *args, **kwargs)
+
+    def guarded_open(path, flags, *args, **kwargs):
+        if is_marker(path, kwargs):
+            opened.append(path)
+            raise OSError("marker opened after failed precheck")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", failed_stat)
+    monkeypatch.setattr(os, "open", guarded_open)
+    assert invoke(arguments(overlay, mode)) == 1
+    captured = capsys.readouterr()
+    assert "original marker precheck failure" in captured.err
+    assert inspected == [False]
+    assert opened == []
+    assert not captured.out
+    assert sorted(p.relative_to(overlay).as_posix() for p in overlay.rglob("*")) == [
+        "metadata",
+        "metadata/layout.conf",
+        "profiles",
+        "profiles/repo_name",
+    ]
+    assert {
+        p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+    } == before
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
+@pytest.mark.parametrize("mode", ["--dry-run", "--write"])
+def test_launcher_refuses_real_fifo_markers_without_waiting_or_artifacts(
+    overlay, tmp_path, marker_name, mode
+):
+    import os
+    import stat
+    import subprocess
+
+    marker_path = overlay / marker_name
+    marker_path.unlink()
+    os.mkfifo(marker_path, 0o600)
+    before = {
+        p.relative_to(overlay): (p.lstat().st_mode, p.lstat().st_ino) for p in overlay.rglob("*")
+    }
+    contents = {p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()}
+    launcher = Path(__file__).resolve().parents[1] / "bin/create-ebuild"
+    result = subprocess.run(
+        [str(launcher), *arguments(overlay, mode)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "overlay markers must be regular files" in result.stderr
+    assert not result.stdout
+    assert stat.S_ISFIFO(marker_path.lstat().st_mode)
+    assert {
+        p.relative_to(overlay): (p.lstat().st_mode, p.lstat().st_ino) for p in overlay.rglob("*")
+    } == before
+    assert {
+        p.relative_to(overlay): p.read_bytes() for p in overlay.rglob("*") if p.is_file()
+    } == contents
+
+
+@pytest.mark.parametrize("marker_name", ["profiles/repo_name", "metadata/layout.conf"])
 @pytest.mark.parametrize("failure_at", ["fdopen", "fstat", "read", "none"])
 @pytest.mark.parametrize("close_errno", ["EIO", "EINTR"])
 def test_marker_descriptor_transfer_and_close_preserve_failure_without_retry_or_leak(
@@ -1493,7 +1778,7 @@ def test_marker_descriptor_transfer_and_close_preserve_failure_without_retry_or_
     def fail_close(fd):
         path = os.readlink(f"/proc/self/fd/{fd}")
         real_close(fd)
-        if failure_at == "fdopen" and path == str(marker_path):
+        if failure_at in {"fdopen", "fstat"} and path == str(marker_path):
             fail_after_release(fd)
 
     monkeypatch.setattr(os, "fdopen", fail_fdopen)
