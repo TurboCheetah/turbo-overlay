@@ -310,7 +310,7 @@ def inventory_entries(path: Path) -> list[tuple[Path, int]]:
 def inventory_packages(root: Path) -> list[tuple[PackageRef, list[Path]]]:
     packages = []
     for category, mode in inventory_entries(root):
-        if category.name.startswith(".") or category.name in SKIP_DIRS:
+        if category.name.startswith(".") or category.name in SKIP_DIRS | {"eclass"}:
             continue
         if stat.S_ISLNK(mode):
             # Only classify the target. Non-directories cannot be categories;
@@ -380,6 +380,49 @@ def context_root(start: Path) -> Path | None:
             raise ValueError(f"Invalid configuration {marker}: marker disappeared")
         return candidate
     return None
+
+
+def verification_commands(root: Path) -> list[dict[str, Any]]:
+    """Suggest target-local commands only when their project or launcher exists."""
+    commands: list[dict[str, Any]] = [
+        {"cwd": str(root), "command": "pkgcheck scan ."},
+        {"cwd": str(root), "command": "pkgcheck scan -f latest category/package"},
+    ]
+    tools = root / TOOLS_PATH
+
+    def local_file(path: Path) -> bool:
+        parent = root
+        try:
+            for component in path.relative_to(root).parts[:-1]:
+                parent /= component
+                if not stat.S_ISDIR(parent.lstat().st_mode):
+                    return False
+            return stat.S_ISREG(path.lstat().st_mode)
+        except FileNotFoundError:
+            return False
+
+    if local_file(tools / "bin/test-ebuild"):
+        commands.append(
+            {
+                "cwd": str(root),
+                "command": (
+                    f"{TOOLS_PATH}/bin/test-ebuild --overlay-path {shlex.quote(str(root))} "
+                    "category/package/package-version.ebuild"
+                ),
+                "requires_trusted_ebuild": True,
+            }
+        )
+    if local_file(tools / "pyproject.toml"):
+        commands.extend(
+            {"cwd": str(tools), "command": command}
+            for command in (
+                "uv run ruff check .",
+                "uv run ruff format --check .",
+                "uv run ty check src autopilot",
+                "uv run pytest -q",
+            )
+        )
+    return commands
 
 
 def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
@@ -515,22 +558,7 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
             "exclusions": section(policy_items, full=full),
             "active_exclusions": section(active_items, full=full),
         },
-        "verification": [
-            {"cwd": str(root), "command": "pkgcheck scan ."},
-            {"cwd": str(root), "command": "pkgcheck scan -f latest category/package"},
-            {
-                "cwd": str(root),
-                "command": (
-                    f"{TOOLS_PATH}/bin/test-ebuild --overlay-path {shlex.quote(str(root))} "
-                    "category/package/package-version.ebuild"
-                ),
-                "requires_trusted_ebuild": True,
-            },
-            {"cwd": str(root / TOOLS_PATH), "command": "uv run ruff check ."},
-            {"cwd": str(root / TOOLS_PATH), "command": "uv run ruff format --check ."},
-            {"cwd": str(root / TOOLS_PATH), "command": "uv run ty check src autopilot"},
-            {"cwd": str(root / TOOLS_PATH), "command": "uv run pytest -q"},
-        ],
+        "verification": verification_commands(root),
     }
     if full:
         context["inventory"]["ebuilds"] = section(sorted(ebuild_paths), full=True)

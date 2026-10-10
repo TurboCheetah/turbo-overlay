@@ -94,11 +94,15 @@ without reading their contents. Target type checks do not traverse inventories.
 Broken or cyclic links cannot be classified and fail rather than being ignored.
 Ebuild symlinks remain errors. Directory links never permit inventory or content
 reads of an outside tree. Local eclass scanning
-also rejects directory and `.eclass` file links before reporting their names.
+requires a real, non-link `eclass` root when present,
+rejects nonregular or linked `.eclass` entries, and
+ignores other entries without traversing them, including directory links.
 Unreadable inventory directories and scan/stat errors fail rather than produce
 incomplete totals. Packages must have discoverable ebuild filenames.
-Hidden and reserved directories, including `deprecated`, do not contribute to
-inventory. A category counts only if it contains a discoverable package.
+Hidden and reserved directories, including `deprecated`, `profiles`, `metadata`
+and `eclass`, do not contribute to package or EAPI inventory. The `eclass` tree
+is inspected separately for top-level `.eclass` names only.
+A category counts only if it contains a discoverable package.
 Inventory includes masked packages and maintenance-excluded packages. Neither
 policy changes what exists on disk.
 
@@ -183,6 +187,13 @@ filesystem sandbox against concurrent path replacement.
 The command never sources ebuilds or eclasses, imports checkout scripts, runs
 verification commands, makes upstream API requests, or edits installed
 configuration. The verification commands are suggestions, not checks performed
-by this report. Package and ebuild paths in them are placeholders. The phase-test
-command requires Docker and a trusted ebuild; do not run it on unreviewed code.
+by this report. Package and ebuild paths in them are placeholders. Python QA
+suggestions require the inspected checkout's
+`.agents/skills/overlay-tools/pyproject.toml`; the phase-test suggestion requires
+its `bin/test-ebuild` file. These must be regular, non-link files beneath real,
+non-link target-local directories. Missing or linked tools omit those suggestions.
+The report never substitutes commands from the wrapper's project or another
+checkout, and it does not check installed executables or dependencies.
+The phase-test command requires Docker and a trusted ebuild; do not run it on
+unreviewed code.
 This is checkout context, not a build, dependency, or QA verdict.

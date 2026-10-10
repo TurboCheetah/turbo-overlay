@@ -62,11 +62,242 @@ def test_json_reports_actual_inventory_and_configuration(tmp_path, capsys):
     assert data["configuration"]["manifest"]["thin_manifests"] is None
     assert "full_configuration" not in data
     assert "pkgcheck scan ." in [item["command"] for item in data["verification"]]
-    assert any(
-        item["command"].startswith(".agents/skills/overlay-tools/bin/test-ebuild --overlay-path ")
-        and item["cwd"] == str(root)
-        for item in data["verification"]
+    assert data["verification"] == [
+        {"cwd": str(root), "command": "pkgcheck scan ."},
+        {"cwd": str(root), "command": "pkgcheck scan -f latest category/package"},
+    ]
+
+
+def copy_tools_project(tools: Path, destination: Path) -> Path:
+    shutil.copytree(
+        tools / "src", destination / "src", ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
     )
+    shutil.copytree(tools / "bin", destination / "bin")
+    shutil.copytree(
+        tools / "autopilot",
+        destination / "autopilot",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copy2(tools / "pyproject.toml", destination / "pyproject.toml")
+    return destination
+
+
+@pytest.fixture(params=["source", "copied"])
+def public_wrapper(request, tmp_path):
+    if shutil.which("uv") is None:
+        pytest.skip("Executable wrapper requires uv")
+    tools = Path(__file__).resolve().parents[1]
+    if request.param == "copied":
+        tools = copy_tools_project(tools, tmp_path / "external-tools")
+    return tools / "bin/overlay-info"
+
+
+def run_public_wrapper(wrapper: Path, root: Path, flags: list[str]):
+    return subprocess.run(
+        [str(wrapper), "--overlay-path", str(root), *flags],
+        cwd=root / "net-im/chat",
+        env={**os.environ, "UV_PROJECT_ENVIRONMENT": sys.prefix, "UV_OFFLINE": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--json"], ["--full"], ["--json", "--full"]],
+    ids=["text", "json", "full-text", "full-json"],
+)
+@pytest.mark.parametrize("target_tools", ["standalone", "copied-project", "linked-project"])
+def test_wrapper_verification_suggestions_use_only_available_target_tools(
+    tmp_path, public_wrapper, flags, target_tools
+):
+    root = make_overlay(tmp_path / "overlay")
+    tools_path = root / ".agents/skills/overlay-tools"
+    marker = root / "verification-executed"
+    if target_tools != "standalone":
+        tools = Path(__file__).resolve().parents[1]
+        if target_tools == "linked-project":
+            outside_tools = copy_tools_project(tools, tmp_path / "other-checkout-tools")
+            tools_path.parent.mkdir(parents=True)
+            tools_path.symlink_to(outside_tools)
+        else:
+            copy_tools_project(tools, tools_path)
+        (tools_path / "bin/test-ebuild").write_text(
+            f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\nexit 99\n"
+        )
+        (tools_path / "tests").mkdir()
+        (tools_path / "tests/conftest.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+            "raise RuntimeError('QA ran')\n"
+        )
+    before = {
+        path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+    result = run_public_wrapper(public_wrapper, root, flags)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    if "--json" in flags:
+        data = json.loads(result.stdout)
+        assert data["checkout"]["root"] == str(root)
+        verification = data["verification"]
+    else:
+        assert f'root: "{root}"' in result.stdout
+        verification = [
+            json.loads(line.strip())
+            for line in result.stdout.split("\nverification:\n", 1)[1].splitlines()
+            if line.lstrip().startswith("{")
+        ]
+    expected: list[dict[str, str | bool]] = [
+        {"cwd": str(root), "command": "pkgcheck scan ."},
+        {"cwd": str(root), "command": "pkgcheck scan -f latest category/package"},
+    ]
+    if target_tools == "copied-project":
+        expected.extend(
+            [
+                {
+                    "cwd": str(root),
+                    "command": (
+                        ".agents/skills/overlay-tools/bin/test-ebuild --overlay-path "
+                        f"{shlex.quote(str(root))} category/package/package-version.ebuild"
+                    ),
+                    "requires_trusted_ebuild": True,
+                },
+                {"cwd": str(tools_path), "command": "uv run ruff check ."},
+                {"cwd": str(tools_path), "command": "uv run ruff format --check ."},
+                {"cwd": str(tools_path), "command": "uv run ty check src autopilot"},
+                {"cwd": str(tools_path), "command": "uv run pytest -q"},
+            ]
+        )
+    assert verification == expected
+    assert all(Path(item["cwd"]).is_dir() for item in verification)
+    assert not marker.exists()
+    assert before == {
+        path.relative_to(root): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--json"], ["--full"], ["--json", "--full"]],
+    ids=["text", "json", "full-text", "full-json"],
+)
+@pytest.mark.parametrize("content", [b"EAPI=7\n", b"\xff"], ids=["literal", "no-content-read"])
+def test_wrapper_reserved_trees_never_contribute_packages_or_eapi(
+    tmp_path, public_wrapper, flags, content
+):
+    parent = make_overlay(tmp_path / "parent", name="parent-overlay")
+    root = make_overlay(parent / "nested", name="nested-overlay")
+    for reserved in ["eclass", "profiles", "metadata"]:
+        package = root / reserved / "pkg"
+        package.mkdir(parents=True)
+        (package / "foo-1.ebuild").write_bytes(content)
+    (root / "eclass/foo.eclass").write_bytes(b"\xff")
+
+    result = run_public_wrapper(public_wrapper, root, flags)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    if "--json" in flags:
+        data = json.loads(result.stdout)
+        assert data["checkout"]["root"] == str(root)
+        assert data["checkout"]["name"] == "nested-overlay"
+        inventory = data["inventory"]
+        assert inventory["category_count"] == 2
+        assert inventory["package_count"] == 2
+        assert inventory["ebuild_count"] == 3
+        assert inventory["packages"]["items"] == [
+            {"atom": "dev-util/editor", "ebuild_count": 2},
+            {"atom": "net-im/chat", "ebuild_count": 1},
+        ]
+        assert data["configuration"]["eapi"]["ebuilds"]["items"] == [{"value": "8", "count": 3}]
+        assert data["configuration"]["eapi"]["unresolved_count"] == 0
+        assert data["local_eclasses"] == {"total": 1, "truncated": 0, "items": ["foo.eclass"]}
+        if "--full" in flags:
+            assert inventory["ebuilds"] == {
+                "total": 3,
+                "truncated": 0,
+                "items": [
+                    "dev-util/editor/editor-1.ebuild",
+                    "dev-util/editor/editor-2.ebuild",
+                    "net-im/chat/chat-3.ebuild",
+                ],
+            }
+    else:
+        assert f'root: "{root}"' in result.stdout
+        assert 'name: "nested-overlay"' in result.stdout
+        assert "category count: 2" in result.stdout
+        assert "package count: 2" in result.stdout
+        assert "ebuild count: 3" in result.stdout
+        assert '{"value": "8", "count": 3}' in result.stdout
+        assert "unresolved count: 0" in result.stdout
+        assert '"foo.eclass"' in result.stdout
+    for reserved in ["eclass", "profiles", "metadata"]:
+        assert f"{reserved}/pkg" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--json"], ["--full"], ["--json", "--full"]],
+    ids=["text", "json", "full-text", "full-json"],
+)
+@pytest.mark.parametrize("kind", ["directory-link", "broken-link", "loop-link", "nested-directory"])
+def test_wrapper_ignores_non_eclass_entries_without_traversal(
+    tmp_path, public_wrapper, flags, kind
+):
+    root = make_overlay(tmp_path / "overlay")
+    eclass = root / "eclass"
+    eclass.mkdir()
+    (eclass / "foo.eclass").write_bytes(b"\xff")
+    ignored = eclass / "ignored"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "outside.eclass").write_bytes(b"\xff")
+    (outside / "foo-1.ebuild").write_bytes(b"\xff")
+    if kind == "directory-link":
+        ignored.symlink_to(outside)
+    elif kind == "broken-link":
+        ignored.symlink_to(tmp_path / "absent")
+    elif kind == "loop-link":
+        ignored.symlink_to(ignored)
+    else:
+        ignored.mkdir()
+        (ignored / "foo-1.ebuild").write_bytes(b"\xff")
+        (ignored / "nested-link").symlink_to(outside)
+
+    result = run_public_wrapper(public_wrapper, root, flags)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    if "--json" in flags:
+        data = json.loads(result.stdout)
+        assert data["inventory"]["category_count"] == 2
+        assert data["inventory"]["package_count"] == 2
+        assert data["inventory"]["ebuild_count"] == 3
+        assert data["local_eclasses"] == {"total": 1, "truncated": 0, "items": ["foo.eclass"]}
+    else:
+        assert "category count: 2" in result.stdout
+        assert "package count: 2" in result.stdout
+        assert "ebuild count: 3" in result.stdout
+        assert '"foo.eclass"' in result.stdout
+    assert "outside.eclass" not in result.stdout
+    assert "ignored" not in result.stdout
+
+
+def test_guide_states_the_public_eclass_scan_boundary():
+    guide = (Path(__file__).resolve().parents[1] / "docs/overlay-info.md").read_text()
+    paragraph = guide.split("Local eclass scanning", 1)[1].split("Unreadable inventory", 1)[0]
+    assert "also rejects directory and" not in paragraph
+    assert "requires a real, non-link `eclass` root" in paragraph
+    assert "rejects nonregular or linked `.eclass` entries" in paragraph
+    assert "ignores other entries without traversing them" in paragraph
 
 
 @pytest.mark.parametrize(
@@ -404,6 +635,7 @@ def test_million_character_input_has_bounded_summary_and_exact_full_output(tmp_p
 
 def test_summary_bounds_paths_and_names_without_claiming_complete_identifiers(tmp_path, capsys):
     root = make_overlay(tmp_path / ("r" * 120) / ("s" * 120))
+    copy_tools_project(Path(__file__).resolve().parents[1], root / ".agents/skills/overlay-tools")
     category = "c" * 245
     package_name = "p" * 245
     package = root / category / package_name
