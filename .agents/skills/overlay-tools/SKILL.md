@@ -175,6 +175,16 @@ Secrets, webhook registration, cron schedule, and state stay outside Git.
 - **uv** - Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **Docker** (`test-ebuild` only) - https://docs.docker.com/engine/install/
 
+## Checkout context
+
+Before relying on package inventory or checkout identity, request
+`.agents/skills/overlay-tools/bin/overlay-info --overlay-path /path/to/checkout --json`
+from the repository root. Read
+[the context guide](docs/overlay-info.md) for bounded lists, truncation counts,
+unchecked Git state and opt-in `--full` masks/configuration. The command reads
+current files without a persistent cache and does not execute verification
+commands. Provision its tools environment separately.
+
 ## Environment Variables
 
 | Variable | Description |
