@@ -24,4 +24,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^\.agents/skills/overlay-tools/(src/|autopilot/|pyproject\.toml$)
+      - id: qa-ebuild-info
+        name: local ebuild QA (informational, not a package PASS gate)
+        entry: .agents/skills/overlay-tools/bin/qa-ebuild-check --overlay-path . --informational
+        language: system
+        pass_filenames: true
+        require_serial: true
+        verbose: true
+        # Filename arguments select only matching packages. Shared inputs select all.
+        files: '^(?:[^./][^/]*/[^/]+/(?:[^/]+\.ebuild|Manifest|metadata\.xml|files/.+)|metadata/md5-cache/[^/]+/[^/]+|metadata/layout\.conf|profiles/.+|eclass/.+)$'
 

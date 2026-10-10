@@ -7,12 +7,28 @@ on:
       - .agents/skills/overlay-tools/**
       - .github/workflows/ci.yml
       - .pre-commit-config.yaml
+      - '*/*/*.ebuild'
+      - '*/*/Manifest'
+      - '*/*/metadata.xml'
+      - '*/*/files/**'
+      - metadata/md5-cache/**
+      - metadata/layout.conf
+      - profiles/**
+      - eclass/**
   pull_request:
     branches: [master]
     paths:
       - .agents/skills/overlay-tools/**
       - .github/workflows/ci.yml
       - .pre-commit-config.yaml
+      - '*/*/*.ebuild'
+      - '*/*/Manifest'
+      - '*/*/metadata.xml'
+      - '*/*/files/**'
+      - metadata/md5-cache/**
+      - metadata/layout.conf
+      - profiles/**
+      - eclass/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +47,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -61,3 +78,26 @@ jobs:
       - name: pytest
         working-directory: .agents/skills/overlay-tools
         run: uv run pytest -q
+
+      - name: Read-only QA for changed packages
+        shell: bash
+        env:
+          QA_EVENT_NAME: ${{ github.event_name }}
+          QA_PR_BASE: ${{ github.event.pull_request.base.sha }}
+          QA_PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$QA_EVENT_NAME" in
+            pull_request) base="$QA_PR_BASE" ;;
+            push) base="$QA_PUSH_BEFORE" ;;
+            *) printf '::error::Unsupported QA event\n' >&2; exit 2 ;;
+          esac
+          if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '::error::Missing or invalid QA base SHA\n' >&2
+            exit 2
+          fi
+          if [[ "$QA_EVENT_NAME" == push && "$base" == 0000000000000000000000000000000000000000 ]]; then
+            .agents/skills/overlay-tools/bin/qa-ebuild-check --overlay-path "$PWD" --initial
+          else
+            .agents/skills/overlay-tools/bin/qa-ebuild-check --overlay-path "$PWD" --changed-since "$base"
+          fi
