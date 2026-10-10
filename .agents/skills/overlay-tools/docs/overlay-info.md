@@ -25,8 +25,8 @@ Imports use the source beside this wrapper, not another installed checkout.
 The wrapper also passes `-B`, so inspection never creates Python bytecode or
 `__pycache__` directories in that source tree. Isolated mode ignores the
 `PYTHONDONTWRITEBYTECODE` environment variable, so the explicit flag is required.
-You can also run
-`python -B -m overlay_tools.cli.overlay_info` in the tools environment.
+Use the wrapper for inspection. A plain Python module invocation does not
+provide its isolated startup or its own-source import guarantee.
 
 ## Output and bounds
 
@@ -87,9 +87,13 @@ output can be large.
 
 Root discovery stops at the nearest `profiles/repo_name` marker, even if it is
 broken or unreadable. Inventory uses checkout-local scanning with the existing
-package directory exclusions and ebuild filename rules. Category, package and
-ebuild symlinks are errors, even when their targets are inside the checkout.
-Links never permit inventory or reads of an outside tree. Local eclass scanning
+package directory exclusions and ebuild filename rules. Category and package
+directory symlinks are errors, even when their targets are inside the checkout.
+At the root and category levels, links to confirmed non-directories are ignored
+without reading their contents. Target type checks do not traverse inventories.
+Broken or cyclic links cannot be classified and fail rather than being ignored.
+Ebuild symlinks remain errors. Directory links never permit inventory or content
+reads of an outside tree. Local eclass scanning
 also rejects directory and `.eclass` file links before reporting their names.
 Unreadable inventory directories and scan/stat errors fail rather than produce
 incomplete totals. Packages must have discoverable ebuild filenames.
@@ -163,11 +167,18 @@ subdirectory of `profiles/package.mask` and reports its files in sorted order.
 Unreadable directories, including nested directories, and scan or file-stat
 errors exit `2` with the failing path on stderr and no stdout. Directory symlinks
 are errors, not omitted subtrees or permission to traverse outside the mask tree.
+The structural `profiles`, `metadata` and `eclass` paths must be real directories
+when present. Links at these paths fail in every mode before configuration or
+inventory reads through them. A nearer linked `profiles` directory is an error,
+not permission to discover an ancestor overlay. Every content reader also checks
+its checkout-relative parent directories before opening the final file.
 Configuration and mask file symlinks retain ordinary regular-file reads; broken
 links and symlink loops fail. Every content read opens nonblocking and checks
 the opened descriptor before reading. FIFOs, sockets, devices and other
 nonregular files fail instead of blocking or being silently omitted.
 Summary mode does not inspect masks, even when their directories are unreadable.
+Directory validation and content reads are separate operations. This is not a
+filesystem sandbox against concurrent path replacement.
 
 The command never sources ebuilds or eclasses, imports checkout scripts, runs
 verification commands, makes upstream API requests, or edits installed

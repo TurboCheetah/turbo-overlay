@@ -58,7 +58,27 @@ def section(items: list[Any], *, full: bool) -> dict[str, Any]:
     return {"total": len(items), "truncated": len(items) - len(shown), "items": shown}
 
 
-def read_optional(path: Path) -> str | None:
+def real_directory(path: Path) -> bool:
+    """Check a structural directory without following its final component."""
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(mode):
+        raise ValueError(f"Invalid directory {path}: symlink")
+    if not stat.S_ISDIR(mode):
+        raise ValueError(f"Invalid directory {path}: expected a real directory")
+    return True
+
+
+def read_optional(path: Path, *, root: Path) -> str | None:
+    # Check every checkout-relative parent before opening the leaf. File links
+    # remain allowed, but must not turn structural parents into outside reads.
+    parent = root
+    for component in path.relative_to(root).parts[:-1]:
+        parent /= component
+        if not real_directory(parent):
+            return None
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         try:
@@ -78,7 +98,7 @@ def read_optional(path: Path) -> str | None:
         raise ValueError(f"Invalid configuration {path}: {exc}") from exc
 
 
-def context_exclusions(path: Path) -> dict[str, str]:
+def context_exclusions(path: Path, *, root: Path) -> dict[str, str]:
     """Use maintenance policy rules, but read through the nonblocking file reader."""
 
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -90,7 +110,7 @@ def context_exclusions(path: Path) -> dict[str, str]:
         return result
 
     try:
-        content = read_optional(path)
+        content = read_optional(path, root=root)
         if content is None:
             return {}
         exclusions = json.loads(content, object_pairs_hook=unique_object)
@@ -112,15 +132,17 @@ def context_exclusions(path: Path) -> dict[str, str]:
 
 def read_masks(root: Path) -> dict[str, str | None]:
     """Enumerate masks without hiding scan/stat errors or following directory links."""
+    if not real_directory(root / "profiles"):
+        return {"profiles/package.mask": None}
     mask_path = root / "profiles/package.mask"
     try:
         mode = mask_path.lstat().st_mode
     except FileNotFoundError:
-        return {"profiles/package.mask": read_optional(mask_path)}
+        return {"profiles/package.mask": read_optional(mask_path, root=root)}
     if not stat.S_ISDIR(mode):
         # Preserve file symlink reads. Directory links fail as unreadable files,
         # rather than escaping the mask tree or silently omitting their masks.
-        return {"profiles/package.mask": read_optional(mask_path)}
+        return {"profiles/package.mask": read_optional(mask_path, root=root)}
     pending = [mask_path]
     paths: list[Path] = []
     while pending:
@@ -132,11 +154,11 @@ def read_masks(root: Path) -> dict[str, str | None]:
                     pending.append(path)
                 else:
                     paths.append(path)
-    return {str(path.relative_to(root)): read_optional(path) for path in sorted(paths)}
+    return {str(path.relative_to(root)): read_optional(path, root=root) for path in sorted(paths)}
 
 
-def read_layout(path: Path) -> tuple[dict[str, str], str | None]:
-    content = read_optional(path)
+def read_layout(path: Path, *, root: Path) -> tuple[dict[str, str], str | None]:
+    content = read_optional(path, root=root)
     settings: dict[str, str] = {}
     for number, line in enumerate((content or "").splitlines(), 1):
         line = line.split("#", 1)[0].strip()
@@ -291,14 +313,20 @@ def inventory_packages(root: Path) -> list[tuple[PackageRef, list[Path]]]:
         if category.name.startswith(".") or category.name in SKIP_DIRS:
             continue
         if stat.S_ISLNK(mode):
-            raise ValueError(f"Invalid inventory {category}: symlink")
+            # Only classify the target. Non-directories cannot be categories;
+            # never read their contents or traverse directory-link targets.
+            if stat.S_ISDIR(category.stat().st_mode):
+                raise ValueError(f"Invalid inventory {category}: directory symlink")
+            continue
         if not stat.S_ISDIR(mode):
             continue
         for package, mode in inventory_entries(category):
             if package.name.startswith("."):
                 continue
             if stat.S_ISLNK(mode):
-                raise ValueError(f"Invalid inventory {package}: symlink")
+                if stat.S_ISDIR(package.stat().st_mode):
+                    raise ValueError(f"Invalid inventory {package}: directory symlink")
+                continue
             if not stat.S_ISDIR(mode):
                 continue
             ebuilds = []
@@ -317,9 +345,9 @@ def inventory_packages(root: Path) -> list[tuple[PackageRef, list[Path]]]:
     return packages
 
 
-def literal_eapi(path: Path) -> str | None:
+def literal_eapi(path: Path, *, root: Path) -> str | None:
     """Read only the first non-comment line, never evaluate shell expressions."""
-    content = read_optional(path)
+    content = read_optional(path, root=root)
     if content is None:
         raise ValueError(f"Invalid inventory {path}: ebuild disappeared")
     for line in content.splitlines():
@@ -338,6 +366,8 @@ def literal_eapi(path: Path) -> str | None:
 def context_root(start: Path) -> Path | None:
     """Do not bypass a nearest overlay marker just because its target is broken."""
     for candidate in (start, *start.parents):
+        if not real_directory(candidate / "profiles"):
+            continue
         marker = candidate / "profiles/repo_name"
         try:
             marker.lstat()
@@ -346,7 +376,7 @@ def context_root(start: Path) -> Path | None:
         except OSError as exc:
             raise ValueError(f"Invalid configuration {marker}: {exc}") from exc
         # Validate before returning, so a directory or unreadable symlink fails here.
-        if read_optional(marker) is None:
+        if read_optional(marker, root=candidate) is None:
             raise ValueError(f"Invalid configuration {marker}: marker disappeared")
         return candidate
     return None
@@ -358,15 +388,17 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
     root = context_root(start)
     if root is None:
         raise ValueError(f"Not a valid Gentoo overlay: {start}; expected profiles/repo_name")
+    for directory in ("profiles", "metadata", "eclass"):
+        real_directory(root / directory)
     name_path = root / "profiles/repo_name"
-    name_content = read_optional(name_path)
+    name_content = read_optional(name_path, root=root)
     name = (name_content or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", name):
         raise ValueError(f"Invalid configuration {name_path}: expected one repository name")
     layout_path = root / "metadata/layout.conf"
-    layout, layout_content = read_layout(layout_path)
+    layout, layout_content = read_layout(layout_path, root=root)
     profile_eapi_path = root / "profiles/eapi"
-    profile_content = read_optional(profile_eapi_path)
+    profile_content = read_optional(profile_eapi_path, root=root)
     profile_eapi = profile_content.strip() if profile_content is not None else None
     if profile_eapi is not None and not re.fullmatch(r"[0-9]{1,3}", profile_eapi):
         raise ValueError(f"Invalid configuration {profile_eapi_path}: expected an EAPI number")
@@ -376,7 +408,7 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
     categories: Counter[str] = Counter()
     category_ebuilds: Counter[str] = Counter()
     policy_path = root / "metadata/update-exclusions.json"
-    exclusions = context_exclusions(policy_path)
+    exclusions = context_exclusions(policy_path, root=root)
     package_items = []
     ebuild_paths: list[str] = []
     for package, ebuilds in packages:
@@ -385,7 +417,7 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
         categories[package.category] += 1
         category_ebuilds[package.category] += len(ebuilds)
         for path in ebuilds:
-            value = literal_eapi(path)
+            value = literal_eapi(path, root=root)
             if value is None:
                 unresolved_eapis += 1
             else:

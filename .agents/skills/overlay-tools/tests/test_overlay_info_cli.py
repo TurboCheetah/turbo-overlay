@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -143,6 +145,69 @@ def test_nearest_invalid_marker_is_not_rescued_by_ancestor(
     assert code == 2
     assert output.out == ""
     assert str(marker) in output.err
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--json"], ["--full"], ["--json", "--full"]],
+    ids=["text", "json", "full-text", "full-json"],
+)
+@pytest.mark.parametrize("kind", ["valid", "invalid-utf8", "broken", "loop"])
+def test_nearest_profiles_directory_link_fails_before_reading_or_ancestor_fallback(
+    tmp_path, capsys, flags, kind
+):
+    parent = make_overlay(tmp_path / "parent", name="parent-overlay")
+    root = parent / "nested"
+    (root / "deep/inside").mkdir(parents=True)
+    linked = root / "profiles"
+    target = tmp_path / "outside"
+    if kind in {"valid", "invalid-utf8"}:
+        target.mkdir()
+        (target / "repo_name").write_text("external-overlay\n")
+        (target / "package.mask").write_text("# Outside secret\ndev-util/editor\n")
+        if kind == "invalid-utf8":
+            (target / "repo_name").write_bytes(b"\xff")
+    elif kind == "loop":
+        target = linked
+    linked.symlink_to(target)
+
+    code, output = invoke(root / "deep/inside", capsys, *flags)
+
+    assert code == 2
+    assert output.out == ""
+    assert str(linked) in output.err
+    assert "symlink" in output.err
+    assert "utf-8" not in output.err
+    assert "Outside secret" not in output.err
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--json"], ["--full"], ["--json", "--full"]],
+    ids=["text", "json", "full-text", "full-json"],
+)
+@pytest.mark.parametrize("content", ["valid", "invalid-utf8", "invalid-policy"])
+def test_metadata_parent_link_fails_before_layout_or_policy_reads(tmp_path, capsys, flags, content):
+    root = make_overlay(tmp_path / "overlay")
+    target = tmp_path / "outside"
+    (root / "metadata").rename(target)
+    (target / "update-exclusions.json").write_text('{"dev-util/editor": "Outside secret"}')
+    if content == "invalid-utf8":
+        (target / "layout.conf").write_bytes(b"\xff")
+    elif content == "invalid-policy":
+        (target / "update-exclusions.json").write_text("{broken")
+    linked = root / "metadata"
+    linked.symlink_to(target)
+
+    code, output = invoke(root, capsys, *flags)
+
+    assert code == 2
+    assert output.out == ""
+    assert str(linked) in output.err
+    assert "symlink" in output.err
+    assert "utf-8" not in output.err
+    assert "Invalid update policy" not in output.err
+    assert "Outside secret" not in output.err
 
 
 def test_symlink_loop_root_is_an_exit_two_error(tmp_path, capsys):
@@ -478,6 +543,85 @@ def test_mask_fifo_fails_in_full_mode_and_stays_ignored_in_summary(tmp_path, fla
         assert result.stderr == ""
 
 
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--json"], ["--full"], ["--json", "--full"]],
+    ids=["text", "json", "full-text", "full-json"],
+)
+@pytest.mark.parametrize("relative", ["README-link", "dev-util/README-link"])
+@pytest.mark.parametrize("kind", ["invalid-utf8", "unreadable", "fifo"])
+def test_inventory_ignores_confirmed_non_directory_links_without_reading_targets(
+    tmp_path, flags, relative, kind
+):
+    root = make_overlay(tmp_path / "overlay")
+    target = tmp_path / "outside-file"
+    if kind == "fifo":
+        os.mkfifo(target)
+    else:
+        target.write_bytes(b"\xff")
+        if kind == "unreadable":
+            target.chmod(0)
+    (root / relative).symlink_to(target)
+    tools = Path(__file__).resolve().parents[1]
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                "-c",
+                (
+                    "import sys; sys.path.insert(0, sys.argv.pop(1)); "
+                    "from overlay_tools.cli.overlay_info import main; sys.exit(main())"
+                ),
+                str(tools / "src"),
+                "--overlay-path",
+                str(root),
+                *flags,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        if "--json" in flags:
+            inventory = json.loads(result.stdout)["inventory"]
+            assert inventory["category_count"] == 2
+            assert inventory["package_count"] == 2
+            assert inventory["ebuild_count"] == 3
+            assert inventory["packages"]["items"] == [
+                {"atom": "dev-util/editor", "ebuild_count": 2},
+                {"atom": "net-im/chat", "ebuild_count": 1},
+            ]
+        else:
+            assert "category count: 2" in result.stdout
+            assert "package count: 2" in result.stdout
+            assert "ebuild count: 3" in result.stdout
+        assert "README-link" not in result.stdout
+    finally:
+        if kind == "unreadable":
+            target.chmod(0o600)
+
+
+@pytest.mark.parametrize("relative", ["broken-link", "dev-util/broken-link"])
+@pytest.mark.parametrize("kind", ["broken", "loop"])
+def test_inventory_unclassifiable_links_fail_instead_of_guessing_file_targets(
+    tmp_path, capsys, relative, kind
+):
+    root = make_overlay(tmp_path / "overlay")
+    path = root / relative
+    path.symlink_to(path if kind == "loop" else tmp_path / "absent")
+
+    code, output = invoke(root, capsys, "--json")
+
+    assert code == 2
+    assert output.out == ""
+    assert str(path) in output.err
+
+
 def test_inventory_rejects_package_links_escaping_the_checkout(tmp_path, capsys):
     root = make_overlay(tmp_path / "overlay")
     outside = tmp_path / "outside"
@@ -508,17 +652,25 @@ def test_inventory_rejects_category_links_escaping_the_checkout(tmp_path, capsys
     assert "symlink" in output.err
 
 
-def test_inventory_rejects_links_resolving_inside_the_checkout(tmp_path, capsys):
+@pytest.mark.parametrize("kind", ["category", "package", "ebuild"])
+def test_inventory_rejects_links_resolving_inside_the_checkout(tmp_path, capsys, kind):
     root = make_overlay(tmp_path / "overlay")
     (root / "dev-util/editor/editor-3.ebuild").write_text("EAPI=8\n")
-    (root / "dev-util/alias-editor").symlink_to(root / "dev-util/editor", target_is_directory=True)
+    if kind == "category":
+        linked, target = root / "alias-cat", root / "dev-util"
+    elif kind == "package":
+        linked, target = root / "dev-util/alias-editor", root / "dev-util/editor"
+    else:
+        linked = root / "dev-util/editor/editor-4.ebuild"
+        target = root / "dev-util/editor/editor-3.ebuild"
+    linked.symlink_to(target)
 
     code, output = invoke(root, capsys, "--json")
 
     # Inventory rejects links before traversing them, even for checkout-local targets.
     assert code == 2
     assert output.out == ""
-    assert "dev-util/alias-editor" in output.err
+    assert str(linked) in output.err
     assert "symlink" in output.err
 
 
@@ -879,7 +1031,8 @@ def test_unreadable_inventory_directories_are_errors_not_empty_totals(
 
 
 @pytest.mark.parametrize("kind", ["directory-link", "file-link", "unreadable-directory"])
-def test_local_eclass_inventory_fails_closed(tmp_path, capsys, kind):
+@pytest.mark.parametrize("flags", [[], ["--json"], ["--full"], ["--json", "--full"]])
+def test_local_eclass_inventory_fails_closed(tmp_path, capsys, kind, flags):
     root = make_overlay(tmp_path / "overlay")
     path = root / "eclass"
     if kind == "directory-link":
@@ -898,7 +1051,7 @@ def test_local_eclass_inventory_fails_closed(tmp_path, capsys, kind):
             (path / "hidden.eclass").write_text("# Hidden\n")
             path.chmod(0)
     try:
-        code, output = invoke(root, capsys, "--json")
+        code, output = invoke(root, capsys, *flags)
         assert code == 2
         assert output.out == ""
         assert str(path) in output.err
@@ -1041,6 +1194,46 @@ def test_public_cli_rejects_special_files_without_blocking(tmp_path, relative, l
     assert str(path) in result.stderr
     assert "Traceback" not in result.stderr
     assert "regular file" in result.stderr or "symlink" in result.stderr
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["text", "json"])
+def test_configuration_leaf_links_preserve_regular_file_reads(tmp_path, capsys, flags):
+    root = make_overlay(tmp_path / "overlay")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    raw = {
+        "profiles/repo_name": "linked-overlay\r\n",
+        "profiles/eapi": "8\r",
+        "metadata/layout.conf": "masters = gentoo\r\nthin-manifests = true\r",
+        "metadata/update-exclusions.json": '{"dev-util/editor": "Linked policy"}\r\n',
+    }
+    for number, (relative, content) in enumerate(raw.items()):
+        target = outside / str(number)
+        target.write_bytes(content.encode())
+        path = root / relative
+        path.unlink(missing_ok=True)
+        path.symlink_to(target)
+
+    code, output = invoke(root, capsys, *flags, "--full")
+
+    assert code == 0, output.err
+    assert output.err == ""
+    if "--json" in flags:
+        data = json.loads(output.out)
+        assert data["checkout"]["name"] == "linked-overlay"
+        assert data["configuration"]["eapi"]["profile"] == "8"
+        assert data["configuration"]["manifest"]["thin_manifests"] == "true"
+        assert data["update_policy"]["active_count"] == 1
+        assert data["update_policy"]["exclusions"]["items"][0]["reason"] == "Linked policy"
+        for relative in ["profiles/repo_name", "profiles/eapi", "metadata/layout.conf"]:
+            assert data["full_configuration"][relative] == raw[relative]
+    else:
+        assert 'name: "linked-overlay"' in output.out
+        assert 'profile: "8"' in output.out
+        assert 'thin manifests: "true"' in output.out
+        assert '"reason": "Linked policy"' in output.out
+        for relative in ["profiles/repo_name", "profiles/eapi", "metadata/layout.conf"]:
+            assert f"{relative}: {json.dumps(raw[relative])}" in output.out
 
 
 def test_missing_optional_configuration_and_policy_are_explicit(tmp_path, capsys):
@@ -1335,6 +1528,80 @@ def test_wrapper_uses_its_own_source_without_bytecode_or_startup_writes(tmp_path
         for path in selected.rglob("*")
         if path.is_file()
     }
+
+
+def test_documented_inspection_uses_isolated_startup_and_own_source(tmp_path):
+    if shutil.which("uv") is None:
+        pytest.skip("Documented wrapper requires uv")
+    tools = Path(__file__).resolve().parents[1]
+    selected = tmp_path / "selected-tools"
+    shutil.copytree(
+        tools / "src", selected / "src", ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+    )
+    (selected / "bin").mkdir()
+    shutil.copy2(tools / "bin/overlay-info", selected / "bin/overlay-info")
+    shutil.copy2(tools / "pyproject.toml", selected / "pyproject.toml")
+    context = selected / "src/overlay_tools/core/context.py"
+    context.write_text(context.read_text().replace('"schema_version": 1', '"schema_version": 99'))
+    root = make_overlay(tmp_path / "overlay")
+    markers = []
+    for location in [root, tmp_path / "pythonpath"]:
+        package = location / "overlay_tools/cli"
+        package.mkdir(parents=True)
+        for name in ["sitecustomize.py", "overlay_tools/cli/overlay_info.py"]:
+            marker = location / (Path(name).stem + "-executed")
+            markers.append(marker)
+            (location / name).write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+            )
+        (package.parent / "__init__.py").write_text("")
+        (package / "__init__.py").write_text("")
+    guide = (tools / "docs/overlay-info.md").read_text()
+    module_example = re.search(r"`(python[^`]*overlay_tools\.cli\.overlay_info)`", guide)
+    if module_example:
+        command = [sys.executable, *shlex.split(module_example[1])[1:], "--json"]
+    else:
+        example = next(
+            line
+            for line in guide.splitlines()
+            if line.startswith("/path/to/tools/bin/overlay-info ") and line.endswith("--json")
+        )
+        command = shlex.split(example)
+        command[0] = str(selected / "bin/overlay-info")
+    command = [str(root) if token == "/path/to/checkout" else token for token in command]
+    before = {
+        path.relative_to(selected): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in selected.rglob("*")
+        if path.is_file()
+    }
+
+    result = subprocess.run(
+        command,
+        cwd=root,
+        env={
+            **os.environ,
+            "UV_PROJECT_ENVIRONMENT": sys.prefix,
+            "UV_OFFLINE": "1",
+            "PYTHONPATH": str(tmp_path / "pythonpath"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert not any(marker.exists() for marker in markers)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    data = json.loads(result.stdout)
+    assert data["schema_version"] == 99
+    assert data["checkout"]["root"] == str(root)
+    assert before == {
+        path.relative_to(selected): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in selected.rglob("*")
+        if path.is_file()
+    }
+    assert list(selected.rglob("__pycache__")) == []
 
 
 def test_module_invalid_root_returns_exit_two_and_no_json(tmp_path):
