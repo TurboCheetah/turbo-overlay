@@ -415,12 +415,10 @@ def write_plan(plan: CreatePlan) -> None:
             if not same_entry(stage_fd, filename, expected):
                 raise ValueError("staging file changed; refusing publication")
         rename_exclusive(category_fd, stage, package)
-        # Record ownership under the published name immediately after the
-        # rename, before any fallible sync or verification, so rollback
-        # removes the published entry rather than the old staging name.
+        # Record the new name before any fallible durability or verification call
+        # so rollback still removes only our published directory and files.
         published = True
-        # The publish only survives power loss if the containing directory
-        # entry is synced, matching the per-file fsync above.
+        # Sync the rename in the containing directory.
         os.fsync(category_fd)
         check_attached(plan, category_fd, category)
         if not same_entry(category_fd, package, stage_identity):
@@ -460,15 +458,13 @@ def write_plan(plan: CreatePlan) -> None:
                 try:
                     if same_entry(category_fd, directory, stage_identity):
                         os.rmdir(directory, dir_fd=category_fd)
-                        # The child entry is already removed; a failing sync
-                        # must name the directory whose durable entry changed
-                        # (the category), not the removed child path.
+                        # Sync removal without misreporting the removed directory
+                        # as a residual when its parent's fsync fails.
                         try:
                             os.fsync(category_fd)
                         except OSError as exc:
                             cleanup_errors.append(
-                                f"{plan.root / category}: rollback fsync failed "
-                                f"after removing {directory_path}: {exc}"
+                                f"{plan.root / category}: rollback directory fsync failed: {exc}"
                             )
                     else:
                         cleanup_errors.append(f"{directory_path} moved or replaced; left untouched")
@@ -486,26 +482,27 @@ def write_plan(plan: CreatePlan) -> None:
                     )
             except OSError as exc:
                 if exc.errno == errno.ENOTEMPTY:
-                    # Preserve the other writer's entries and enumerate the
-                    # actual residual absolute paths for the diagnostic.
+                    # Preserve the other writer's entry, keep the diagnostic.
+                    cleanup_errors.append(
+                        f"{plan.root / category} not empty; residual entries left untouched"
+                    )
                     try:
-                        residual_fd = os.open(category, DIRECTORY_FLAGS, dir_fd=root_fd)
-                    except OSError as open_exc:
-                        cleanup_errors.append(
-                            f"{plan.root / category} not empty; "
-                            f"cannot list residual entries: {open_exc}"
-                        )
-                    else:
+                        scan_fd = os.open(category, DIRECTORY_FLAGS, dir_fd=root_fd)
                         try:
-                            residual = ", ".join(
-                                str(plan.root / category / name)
-                                for name in sorted(os.listdir(residual_fd))
-                            )
+                            if identity(os.fstat(scan_fd)) == category_identity:
+                                cleanup_errors.extend(
+                                    f"{plan.root / category / name} left untouched"
+                                    for name in sorted(os.listdir(scan_fd))
+                                )
+                            else:
+                                cleanup_errors.append(
+                                    f"{plan.root / category} moved or replaced; left untouched"
+                                )
                         finally:
-                            cleanup_close(residual_fd, plan.root / category, cleanup_errors)
+                            cleanup_close(scan_fd, plan.root / category, cleanup_errors)
+                    except OSError as scan_exc:
                         cleanup_errors.append(
-                            f"{plan.root / category} not empty; "
-                            f"residual entries left untouched: {residual or 'none observed'}"
+                            f"{plan.root / category}: cannot inspect residual entries: {scan_exc}"
                         )
                 else:
                     cleanup_errors.append(f"{plan.root / category}: {exc}")

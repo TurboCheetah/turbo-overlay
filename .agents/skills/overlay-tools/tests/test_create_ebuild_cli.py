@@ -485,6 +485,106 @@ def test_io_failure_removes_only_own_partial_outputs(
         assert not category.exists()
 
 
+@pytest.mark.parametrize("existing_category", [False, True])
+@pytest.mark.parametrize("failure_errno", ["EIO", "ENOSPC"])
+def test_postrename_fsync_failure_rolls_back_owned_package_and_allows_retry(
+    overlay, monkeypatch, capsys, existing_category, failure_errno
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    target = category / "example-bin"
+    if existing_category:
+        category.mkdir()
+        (category / "unrelated").write_bytes(b"other writer\x00\xff")
+    real_fsync = os.fsync
+    failed = False
+
+    def fail_after_rename(fd):
+        nonlocal failed
+        if os.readlink(f"/proc/self/fd/{fd}") == str(category) and target.exists() and not failed:
+            failed = True
+            raise OSError(getattr(errno, failure_errno), "original post-rename fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_after_rename)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert failed
+    assert "original post-rename fsync failure" in captured.err
+    assert "Written starter" not in captured.out
+    assert not target.exists()
+    assert "cleanup incomplete" not in captured.err
+    if existing_category:
+        assert [p.name for p in category.iterdir()] == ["unrelated"]
+        assert (category / "unrelated").read_bytes() == b"other writer\x00\xff"
+    else:
+        assert not category.exists()
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+    assert invoke(arguments(overlay, "--write")) == 0
+    assert "Written starter only" in capsys.readouterr().out
+    assert sorted(p.name for p in target.iterdir()) == [
+        "example-bin-1.2.3.ebuild",
+        "metadata.xml",
+    ]
+
+
+@pytest.mark.parametrize("existing_category", [False, True])
+@pytest.mark.parametrize("failure_at", ["artifact", "post-rename"])
+def test_rollback_fsync_failure_retains_primary_and_names_synced_category(
+    overlay, monkeypatch, capsys, existing_category, failure_at
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    target = category / "example-bin"
+    if existing_category:
+        category.mkdir()
+        (category / "unrelated").write_bytes(b"other writer\x00\xff")
+    real_fsync = os.fsync
+    primary_failed = False
+    rollback_failed = False
+
+    def fail_primary_and_rollback(fd):
+        nonlocal primary_failed, rollback_failed
+        path = os.readlink(f"/proc/self/fd/{fd}")
+        if not primary_failed and (
+            (failure_at == "artifact" and path.endswith(".ebuild"))
+            or (failure_at == "post-rename" and path == str(category) and target.exists())
+        ):
+            primary_failed = True
+            raise OSError(errno.ENOSPC, "original creation fsync failure")
+        if primary_failed and path == str(category) and not rollback_failed:
+            rollback_failed = True
+            raise OSError(errno.EIO, "secondary rollback fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_primary_and_rollback)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert primary_failed and rollback_failed
+    assert "original creation fsync failure" in captured.err
+    assert "cleanup incomplete" in captured.err
+    assert f"{category}: rollback directory fsync failed: " in captured.err
+    assert "secondary rollback fsync failure" in captured.err
+    assert not captured.out
+    assert not target.exists()
+    if existing_category:
+        assert [p.name for p in category.iterdir()] == ["unrelated"]
+        assert (category / "unrelated").read_bytes() == b"other writer\x00\xff"
+    else:
+        assert not category.exists()
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+    assert invoke(arguments(overlay, "--write")) == 0
+    assert "Written starter only" in capsys.readouterr().out
+
+
 def test_category_rmdir_enotempty_preserves_entry_and_diagnoses_residual(
     overlay, monkeypatch, capsys
 ):
@@ -515,6 +615,294 @@ def test_category_rmdir_enotempty_preserves_entry_and_diagnoses_residual(
     assert str(category / "unrelated") in captured.err
     assert category.exists()
     assert (category / "unrelated").read_text() == "other writer"
+
+
+@pytest.mark.parametrize("entry_kind", ["file", "directory", "symlink"])
+def test_category_cleanup_reports_exact_concurrent_residual_paths(
+    overlay, tmp_path, monkeypatch, capsys, entry_kind
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    residual = category / "other-writer"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_bytes(b"outside\x00\xff")
+    real_fsync, real_rmdir = os.fsync, os.rmdir
+    failed = False
+    raced = False
+
+    def fail_write_once(fd):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError(errno.EIO, "original artifact fsync failure")
+        return real_fsync(fd)
+
+    def race_category_removal(path, *args, **kwargs):
+        nonlocal raced
+        if path == "dev-util" and not raced:
+            raced = True
+            if entry_kind == "file":
+                residual.write_bytes(b"other writer\x00\xff")
+            elif entry_kind == "directory":
+                residual.mkdir()
+                (residual / "keep").write_bytes(b"other writer\x00\xff")
+            else:
+                residual.symlink_to(outside, target_is_directory=True)
+        return real_rmdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "fsync", fail_write_once)
+    monkeypatch.setattr(os, "rmdir", race_category_removal)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert failed and raced
+    assert "original artifact fsync failure" in captured.err
+    assert f"{category} not empty; residual entries left untouched" in captured.err
+    assert f"{residual} left untouched" in captured.err
+    assert not captured.out
+    assert [p.name for p in category.iterdir()] == ["other-writer"]
+    if entry_kind == "file":
+        assert residual.read_bytes() == b"other writer\x00\xff"
+    elif entry_kind == "directory":
+        assert [p.name for p in residual.iterdir()] == ["keep"]
+        assert (residual / "keep").read_bytes() == b"other writer\x00\xff"
+    else:
+        assert residual.is_symlink()
+        assert residual.readlink() == outside
+    assert [p.name for p in outside.iterdir()] == ["keep"]
+    assert (outside / "keep").read_bytes() == b"outside\x00\xff"
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("mutation", ["unknown-file", "replaced-file", "replaced-target"])
+def test_postrename_fsync_failure_preserves_unknown_entries_with_published_paths(
+    overlay, tmp_path, monkeypatch, capsys, mutation
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    target = category / "example-bin"
+    artifact = target / "example-bin-1.2.3.ebuild"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_bytes(b"outside\x00\xff")
+    moved = tmp_path / "moved-package"
+    real_fsync = os.fsync
+    failed = False
+
+    def fail_after_rename(fd):
+        nonlocal failed
+        if os.readlink(f"/proc/self/fd/{fd}") == str(category) and target.exists() and not failed:
+            failed = True
+            if mutation == "unknown-file":
+                (target / "unknown").write_bytes(b"other writer\x00\xff")
+            elif mutation == "replaced-file":
+                artifact.rename(tmp_path / "original-artifact")
+                artifact.write_bytes(b"other writer\x00\xff")
+            else:
+                target.rename(moved)
+                target.symlink_to(outside, target_is_directory=True)
+            raise OSError(errno.EIO, "original post-rename fsync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_after_rename)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert failed
+    assert "original post-rename fsync failure" in captured.err
+    assert "cleanup incomplete" in captured.err
+    assert ".create-ebuild-" not in captured.err
+    assert not captured.out
+    if mutation == "replaced-target":
+        assert f"{target} moved or replaced; left untouched" in captured.err
+        assert target.is_symlink()
+        assert target.readlink() == outside
+        assert list(moved.iterdir()) == []
+    else:
+        residual = target / "unknown" if mutation == "unknown-file" else artifact
+        assert f"{residual} left untouched" in captured.err
+        assert [p.name for p in target.iterdir()] == [residual.name]
+        assert residual.read_bytes() == b"other writer\x00\xff"
+    assert [p.name for p in category.iterdir()] == ["example-bin"]
+    assert [p.name for p in outside.iterdir()] == ["keep"]
+    assert (outside / "keep").read_bytes() == b"outside\x00\xff"
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
+
+
+@pytest.mark.parametrize("failure_at", ["open", "fstat", "list", "close-EIO", "close-EINTR"])
+def test_category_residual_scan_failure_preserves_primary_and_closes_once(
+    overlay, tmp_path, monkeypatch, capsys, failure_at
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    residual = category / "other-writer"
+    real_open, real_fstat, real_listdir = os.open, os.fstat, os.listdir
+    real_close, real_rmdir, real_fsync = os.close, os.rmdir, os.fsync
+    primary_failed = False
+    raced = False
+    scan_fd = None
+    sentinel_fd = None
+    triggered = False
+
+    def fail_write_once(fd):
+        nonlocal primary_failed
+        if not primary_failed:
+            primary_failed = True
+            raise OSError(errno.ENOSPC, "original artifact fsync failure")
+        return real_fsync(fd)
+
+    def race_removal(path, *args, **kwargs):
+        nonlocal raced
+        if path == "dev-util" and not raced:
+            raced = True
+            residual.write_bytes(b"other writer\x00\xff")
+        return real_rmdir(path, *args, **kwargs)
+
+    def scan_open(path, flags, *args, **kwargs):
+        nonlocal scan_fd, triggered
+        if raced and path == "dev-util":
+            if failure_at == "open":
+                triggered = True
+                raise OSError(errno.EIO, "secondary residual scan failure")
+            scan_fd = real_open(path, flags, *args, **kwargs)
+            return scan_fd
+        return real_open(path, flags, *args, **kwargs)
+
+    def scan_fstat(fd):
+        nonlocal triggered
+        if fd == scan_fd and failure_at == "fstat":
+            triggered = True
+            raise OSError(errno.EIO, "secondary residual scan failure")
+        return real_fstat(fd)
+
+    def scan_listdir(fd):
+        nonlocal triggered
+        if fd == scan_fd and failure_at == "list":
+            triggered = True
+            raise OSError(errno.EIO, "secondary residual scan failure")
+        return real_listdir(fd)
+
+    def scan_close(fd):
+        nonlocal triggered, sentinel_fd
+        real_close(fd)
+        if fd == scan_fd and failure_at.startswith("close-") and not triggered:
+            triggered = True
+            sentinel_fd = real_open(tmp_path / "sentinel", os.O_CREAT | os.O_RDWR, 0o600)
+            if sentinel_fd != fd:
+                os.dup2(sentinel_fd, fd)
+                real_close(sentinel_fd)
+                sentinel_fd = fd
+            raise OSError(
+                getattr(errno, failure_at.removeprefix("close-")), "secondary residual scan failure"
+            )
+
+    monkeypatch.setattr(os, "fsync", fail_write_once)
+    monkeypatch.setattr(os, "rmdir", race_removal)
+    monkeypatch.setattr(os, "open", scan_open)
+    monkeypatch.setattr(os, "fstat", scan_fstat)
+    monkeypatch.setattr(os, "listdir", scan_listdir)
+    monkeypatch.setattr(os, "close", scan_close)
+    try:
+        assert invoke(arguments(overlay, "--write")) == 1
+        captured = capsys.readouterr()
+        assert primary_failed and raced and triggered
+        assert "original artifact fsync failure" in captured.err
+        assert "secondary residual scan failure" in captured.err
+        assert "cleanup incomplete" in captured.err
+        assert str(category) in captured.err
+        assert not captured.out
+        assert [p.name for p in category.iterdir()] == ["other-writer"]
+        assert residual.read_bytes() == b"other writer\x00\xff"
+        if failure_at.startswith("close-"):
+            assert f"{category}: close failed:" in captured.err
+            assert "descriptor state uncertain; not retried" in captured.err
+            assert f"{residual} left untouched" in captured.err
+            assert sentinel_fd is not None
+            real_fstat(sentinel_fd)
+        else:
+            assert f"{category}: cannot inspect residual entries:" in captured.err
+        for entry in Path("/proc/self/fd").iterdir():
+            with suppress(FileNotFoundError):
+                assert not os.readlink(entry).startswith(str(overlay))
+    finally:
+        if sentinel_fd is not None:
+            real_close(sentinel_fd)
+
+
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_category_residual_scan_does_not_inspect_a_replacement(
+    overlay, tmp_path, monkeypatch, capsys, replacement
+):
+    import errno
+    import os
+
+    category = overlay / "dev-util"
+    moved = tmp_path / "moved-category"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_bytes(b"outside\x00\xff")
+    real_fsync, real_rmdir = os.fsync, os.rmdir
+    failed = False
+    swapped = False
+
+    def fail_write_once(fd):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError(errno.EIO, "original artifact fsync failure")
+        return real_fsync(fd)
+
+    def swap_after_enotempty(path, *args, **kwargs):
+        nonlocal swapped
+        if path == "dev-util" and not swapped:
+            (category / "original-residual").write_bytes(b"other writer\x00\xff")
+            try:
+                real_rmdir(path, *args, **kwargs)
+            except OSError as exc:
+                assert exc.errno == errno.ENOTEMPTY
+                swapped = True
+                category.rename(moved)
+                if replacement == "directory":
+                    category.mkdir()
+                    (category / "replacement-residual").write_bytes(b"replacement\x00\xff")
+                else:
+                    category.symlink_to(outside, target_is_directory=True)
+                raise
+        return real_rmdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "fsync", fail_write_once)
+    monkeypatch.setattr(os, "rmdir", swap_after_enotempty)
+    assert invoke(arguments(overlay, "--write")) == 1
+    captured = capsys.readouterr()
+    assert failed and swapped
+    assert "original artifact fsync failure" in captured.err
+    assert "cleanup incomplete" in captured.err
+    assert not captured.out
+    assert [p.name for p in moved.iterdir()] == ["original-residual"]
+    assert (moved / "original-residual").read_bytes() == b"other writer\x00\xff"
+    if replacement == "directory":
+        assert f"{category} moved or replaced; left untouched" in captured.err
+        assert "replacement-residual" not in captured.err
+        assert [p.name for p in category.iterdir()] == ["replacement-residual"]
+        assert (category / "replacement-residual").read_bytes() == b"replacement\x00\xff"
+    else:
+        assert f"{category}: cannot inspect residual entries:" in captured.err
+        assert category.is_symlink()
+        assert category.readlink() == outside
+    assert [p.name for p in outside.iterdir()] == ["keep"]
+    assert (outside / "keep").read_bytes() == b"outside\x00\xff"
+    for entry in Path("/proc/self/fd").iterdir():
+        with suppress(FileNotFoundError):
+            assert not os.readlink(entry).startswith(str(overlay))
 
 
 def test_publish_fsyncs_the_category_directory(overlay, monkeypatch, capsys):
@@ -626,8 +1014,8 @@ def test_rollback_sync_failure_names_synced_category_not_removed_child(
     # After the child entry is already removed, the failing sync diagnostic
     # names the directory whose durable change mattered (the category), not
     # the removed child path.
-    assert "rollback fsync failed" in captured.err
-    assert str(category) in captured.err
+    assert f"{category}: rollback directory fsync failed: " in captured.err
+    assert f"{target}: rollback directory fsync failed: " not in captured.err
     assert not target.exists()
     if existing_category:
         assert [p.name for p in category.iterdir()] == ["unrelated"]

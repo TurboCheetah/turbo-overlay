@@ -145,7 +145,11 @@ required; failure does not fall back to an overwriting rename.
 
 On an I/O or verification failure, cleanup unlinks only recorded file identities
 and removes empty owned directories without recursive traversal. This includes
-failures in the final checks after publication. A clean rollback permits retry.
+failures syncing the category after the publish rename and failures in the final
+checks after publication. The rename is recorded before attempting its directory
+sync, so rollback uses the published package name even when that sync fails.
+A clean rollback permits retry. A rollback directory-sync error names the synced
+category and preserves the original failure, even if owned entries are already gone.
 Unknown or replaced entries are left alone. If the identity read immediately after
 creating a category or staging directory fails, the tool leaves that unidentified
 entry untouched rather than guessing ownership or retrying the read to delete it.
