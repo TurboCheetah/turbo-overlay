@@ -1,6 +1,6 @@
 ---
 name: overlay-tools
-description: Gentoo overlay maintenance tools. Use /check-updates to find outdated packages, /update-ebuild to bump versions, /test-ebuild to run an ebuild's Portage phases in Docker.
+description: Gentoo overlay maintenance tools. Use /check-updates to find outdated packages, /update-ebuild to bump versions, /qa-ebuild for read-only local QA, /test-ebuild to run an ebuild's Portage phases in Docker.
 license: MIT
 metadata:
   audience: maintainers
@@ -9,6 +9,7 @@ aliases:
   - check-updates
   - update-ebuild
   - test-ebuild
+  - qa-ebuild
 ---
 
 # Overlay Tools
@@ -118,6 +119,33 @@ ebuilds and Manifests; do not automatically uninstall existing packages.
 | `--branch BRANCH` | Override feature branch name |
 | `--draft` | Create PR as draft |
 | `--upstream-url URL` | Upstream release URL for PR body |
+
+### qa-ebuild
+
+Run local read-only QA before a phase test, using an explicit checkout path.
+
+```bash
+.agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/pr-checkout category/package
+.agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/pr-checkout --changed-since origin/master --json
+```
+
+Read [the QA contract](docs/qa-ebuild.md) before interpreting a result. Exit `0`
+means the selected local checks passed, `1` means findings, and `2` means an
+inconclusive or empty scan. Remote DIST bytes and expanded metadata are unchecked.
+The command reuses the existing tools `.venv`; it never resolves dependencies,
+sources package code or regenerates caches or Manifests. Missing environment is
+inconclusive. Do not repair baseline caches merely to make this check green.
+
+Keep the integrations distinct. The verbose `qa-ebuild-info` pre-commit hook is
+informational and displays the authoritative QA status while its wrapper exits
+`0`. CI's `qa-ebuild-check --changed-since REF` keeps findings and environment
+failures nonzero, and prints `not applicable: no package targets changed` for a
+successful selection with no current targets. Shared layout, profile and eclass
+changes select all current packages. An initial push checks all packages rather
+than inventing a base. Keep GitHub inputs in step environment variables and
+replay the actual workflow body when changing this integration. Neither hook nor
+CI enables pkgcheck. `--pkgcheck` is a separate trusted-code opt-in and may execute
+metadata generation through the external tool.
 
 ### test-ebuild
 
