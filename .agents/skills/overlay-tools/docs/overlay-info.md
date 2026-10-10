@@ -7,7 +7,7 @@ package list or a previous run. Requires Python 3.11 or newer. Git is optional.
 # Install the tools and development dependencies once.
 uv sync --locked --group dev --project .agents/skills/overlay-tools
 
-# Run from the checkout root, or any directory beneath it.
+# Run this relative launcher path from the checkout root.
 .agents/skills/overlay-tools/bin/overlay-info
 
 # Select a checkout explicitly, regardless of the current directory.
@@ -86,13 +86,17 @@ output can be large.
 | `full_configuration` | Full mode only, exact text of `metadata/layout.conf`, `profiles/repo_name`, `profiles/eapi`, and `profiles/package.mask` or its directory files |
 
 Root discovery stops at the nearest `profiles/repo_name` marker, even if it is
-broken or unreadable. Inventory uses the existing `find_packages` and
-`find_ebuilds` discovery rules. Packages must have discoverable ebuild filenames.
+broken or unreadable. Inventory uses checkout-local scanning with the existing
+package directory exclusions and ebuild filename rules. Category, package and
+ebuild symlinks are errors, even when their targets are inside the checkout.
+Links never permit inventory or reads of an outside tree. Local eclass scanning
+also rejects directory and `.eclass` file links before reporting their names.
+Unreadable inventory directories and scan/stat errors fail rather than produce
+incomplete totals. Packages must have discoverable ebuild filenames.
 Hidden and reserved directories, including `deprecated`, do not contribute to
 inventory. A category counts only if it contains a discoverable package.
 Inventory includes masked packages and maintenance-excluded packages. Neither
-policy changes what exists on disk. Category or package paths that resolve
-outside the checkout are an error, never permission to report external trees.
+policy changes what exists on disk.
 
 Manifest fields reflect explicit `thin-manifests`, `sign-manifests`,
 `use-manifests`, `manifest-hashes` and `manifest-required-hashes` settings.
@@ -106,8 +110,9 @@ non-comment, non-blank line. Quoted literals and trailing comments are accepted.
 Missing or dynamic declarations increment `unresolved_count`; the tool does not
 guess an EAPI or evaluate shell expressions.
 
-The update policy is `metadata/update-exclusions.json`, using the same validator
-as the maintenance commands. Missing policy means no exclusions. `active_count`
+The update policy is `metadata/update-exclusions.json`, using the same validation
+rules as the maintenance commands with a nonblocking regular-file reader.
+Missing policy means no exclusions. `active_count`
 and `active_exclusions` refer to policy atoms that are currently discoverable
 packages. They do not mean Portage installation eligibility. Portage masks are
 separate and never inferred as update exclusions.
@@ -150,19 +155,18 @@ Success exits `0`. Invalid arguments, roots, configuration or policy exit `2`,
 print a diagnostic to stderr, and emit no partial context on stdout. The wrapper
 exits `127` if `uv` is missing; missing environment dependencies remain an
 explicit `uv` failure. Missing optional layout, profile EAPI or policy files
-remain distinguishable from malformed or unreadable files. Non-regular
-configuration files, such as a FIFO or device at `profiles/repo_name` or
-`metadata/layout.conf`, fail fast instead of blocking the command. Duplicate layout
+remain distinguishable from malformed or unreadable files. Duplicate layout
 keys and duplicate policy atoms fail rather than silently choosing a value.
-Mask contents are reported as raw text and are not syntax-validated. Structural
-failures -- non-regular mask files, unreadable directories, and unreadable
-files -- exit `2` when requested with `--full`, with the failing path on stderr
-and no stdout. Full mode scans every real
+Masks are raw UTF-8 text, with no atom syntax validation. Invalid UTF-8 or read
+errors fail when masks are requested with `--full`. Full mode scans every real
 subdirectory of `profiles/package.mask` and reports its files in sorted order.
 Unreadable directories, including nested directories, and scan or file-stat
 errors exit `2` with the failing path on stderr and no stdout. Directory symlinks
 are errors, not omitted subtrees or permission to traverse outside the mask tree.
-File symlinks retain ordinary file reads; broken links and symlink loops fail.
+Configuration and mask file symlinks retain ordinary regular-file reads; broken
+links and symlink loops fail. Every content read opens nonblocking and checks
+the opened descriptor before reading. FIFOs, sockets, devices and other
+nonregular files fail instead of blocking or being silently omitted.
 Summary mode does not inspect masks, even when their directories are unreadable.
 
 The command never sources ebuilds or eclasses, imports checkout scripts, runs

@@ -253,12 +253,12 @@ def test_summary_bounds_every_growing_list_and_full_restores_data(tmp_path, caps
     assert full["configuration"]["eapi"]["profile"] == "8"
 
 
-@pytest.mark.parametrize("hash_token", ["X" * 1_000, "😀" * 1_000], ids=["ascii", "unicode"])
+@pytest.mark.parametrize("hash_token", ["X" * 1_001, "😀" * 1_000], ids=["ascii", "unicode"])
 def test_summary_bounds_massive_identifiers_and_counts_omitted_codepoints(
     tmp_path, capsys, hash_token
 ):
     root = make_overlay(tmp_path)
-    atom = "cat/" + "a" * 1_000_000
+    atom = "cat/" + "a" * 1_001
     reason = "😀" * 1_001
     (root / "metadata/update-exclusions.json").write_text(json.dumps({atom: reason}))
     (root / "metadata/layout.conf").write_text(
@@ -280,11 +280,13 @@ def test_summary_bounds_massive_identifiers_and_counts_omitted_codepoints(
     truncated = {entry["path"]: entry for entry in data["string_truncations"]}
     assert truncated["/update_policy/exclusions/items/0/atom"] == {
         "path": "/update_policy/exclusions/items/0/atom",
-        "characters": 1_000_004,
-        "truncated": 999_764,
+        "characters": 1_005,
+        "truncated": 765,
     }
     assert truncated["/update_policy/exclusions/items/0/reason"]["truncated"] == 761
-    assert truncated["/configuration/manifest/hashes/items/0"]["truncated"] == len(hash_token) - 240
+    assert truncated["/configuration/manifest/hashes/items/0"]["truncated"] == (
+        761 if hash_token.startswith("X") else 760
+    )
     hashes = data["configuration"]["manifest"]["hashes"]
     assert hashes["total"] == 35
     assert hashes["truncated"] == 25
@@ -303,6 +305,36 @@ def test_summary_bounds_massive_identifiers_and_counts_omitted_codepoints(
     assert data["update_policy"]["exclusions"]["items"][0]["atom"] == atom
     assert data["update_policy"]["exclusions"]["items"][0]["reason"] == reason
     assert data["configuration"]["manifest"]["hashes"]["items"] == [hash_token] * 35
+
+
+def test_million_character_input_has_bounded_summary_and_exact_full_output(tmp_path, capsys):
+    root = make_overlay(tmp_path)
+    token = "X" * 1_000_000
+    (root / "metadata/layout.conf").write_text(f"manifest-hashes = {token}\n")
+
+    code, output = invoke(root, capsys, "--json")
+    assert code == 0
+    assert len(output.out.encode("utf-8")) <= 131_072
+    data = json.loads(output.out)
+    assert data["configuration"]["manifest"]["hashes"]["items"] == ["X" * 240]
+    assert {
+        "path": "/configuration/manifest/hashes/items/0",
+        "characters": 1_000_000,
+        "truncated": 999_760,
+    } in data["string_truncations"]
+
+    code, output = invoke(root, capsys)
+    assert code == 0
+    assert len(output.out.encode("utf-8")) <= 131_072
+    assert "X" * 241 not in output.out
+
+    code, output = invoke(root, capsys, "--json", "--full")
+    assert code == 0
+    assert len(output.out.encode("utf-8")) > 131_072
+    data = json.loads(output.out)
+    assert data["string_truncations"] == []
+    assert data["configuration"]["manifest"]["hashes"]["items"] == [token]
+    assert data["full_configuration"]["metadata/layout.conf"] == f"manifest-hashes = {token}\n"
 
 
 def test_summary_bounds_paths_and_names_without_claiming_complete_identifiers(tmp_path, capsys):
@@ -388,16 +420,18 @@ def test_non_regular_configuration_files_fail_without_blocking(tmp_path, relativ
     result = subprocess.run(
         [
             sys.executable,
+            "-I",
+            "-B",
             "-c",
             (
-                "import sys; "
+                "import sys; sys.path.insert(0, sys.argv.pop(1)); "
                 "from overlay_tools.cli.overlay_info import main; "
                 "sys.exit(main(['--json', '--overlay-path', sys.argv[1]]))"
             ),
+            str(tools / "src"),
             str(root),
         ],
         cwd=tools,
-        env={**os.environ, "PYTHONPATH": str(tools / "src")},
         capture_output=True,
         text=True,
         check=False,
@@ -406,7 +440,7 @@ def test_non_regular_configuration_files_fail_without_blocking(tmp_path, relativ
     assert result.returncode == 2
     assert result.stdout == ""
     assert relative in result.stderr
-    assert "not a regular file" in result.stderr
+    assert "regular file" in result.stderr
 
 
 @pytest.mark.parametrize("flags", [[], ["--full"]], ids=["summary", "full"])
@@ -417,17 +451,19 @@ def test_mask_fifo_fails_in_full_mode_and_stays_ignored_in_summary(tmp_path, fla
     result = subprocess.run(
         [
             sys.executable,
+            "-I",
+            "-B",
             "-c",
             (
-                "import sys; "
+                "import sys; sys.path.insert(0, sys.argv.pop(1)); "
                 "from overlay_tools.cli.overlay_info import main; "
                 "sys.exit(main(['--overlay-path', sys.argv[1], *sys.argv[2:]]))"
             ),
+            str(tools / "src"),
             str(root),
             *flags,
         ],
         cwd=tools,
-        env={**os.environ, "PYTHONPATH": str(tools / "src")},
         capture_output=True,
         text=True,
         check=False,
@@ -436,7 +472,7 @@ def test_mask_fifo_fails_in_full_mode_and_stays_ignored_in_summary(tmp_path, fla
     if flags:
         assert result.returncode == 2
         assert result.stdout == ""
-        assert "not a regular file" in result.stderr
+        assert "regular file" in result.stderr
     else:
         assert result.returncode == 0
         assert result.stderr == ""
@@ -454,7 +490,7 @@ def test_inventory_rejects_package_links_escaping_the_checkout(tmp_path, capsys)
     assert code == 2
     assert output.out == ""
     assert "dev-util/escaped" in output.err
-    assert "escapes the checkout" in output.err
+    assert "symlink" in output.err
 
 
 def test_inventory_rejects_category_links_escaping_the_checkout(tmp_path, capsys):
@@ -468,20 +504,22 @@ def test_inventory_rejects_category_links_escaping_the_checkout(tmp_path, capsys
 
     assert code == 2
     assert output.out == ""
-    assert "extra-cat/tool" in output.err
-    assert "escapes the checkout" in output.err
+    assert "extra-cat" in output.err
+    assert "symlink" in output.err
 
 
-def test_inventory_allows_links_resolving_inside_the_checkout(tmp_path, capsys):
+def test_inventory_rejects_links_resolving_inside_the_checkout(tmp_path, capsys):
     root = make_overlay(tmp_path / "overlay")
     (root / "dev-util/editor/editor-3.ebuild").write_text("EAPI=8\n")
     (root / "dev-util/alias-editor").symlink_to(root / "dev-util/editor", target_is_directory=True)
 
     code, output = invoke(root, capsys, "--json")
 
-    assert code == 0
-    data = json.loads(output.out)
-    assert data["inventory"]["package_count"] == 3
+    # Inventory rejects links before traversing them, even for checkout-local targets.
+    assert code == 2
+    assert output.out == ""
+    assert "dev-util/alias-editor" in output.err
+    assert "symlink" in output.err
 
 
 def test_text_full_keeps_underscore_path_keys_raw(tmp_path, capsys):
@@ -791,6 +829,84 @@ def test_submodule_filters_are_also_unchecked_before_content_comparison(
     }
 
 
+@pytest.mark.parametrize("full", [False, True])
+@pytest.mark.parametrize("kind", ["category", "package", "ebuild"])
+def test_inventory_rejects_external_links_without_partial_output(tmp_path, capsys, kind, full):
+    root = make_overlay(tmp_path / "overlay")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if kind == "category":
+        (outside / "tool").mkdir()
+        (outside / "tool/tool-1.ebuild").write_bytes(b"\xff")
+        linked = root / "external-cat"
+    elif kind == "package":
+        (outside / "tool-1.ebuild").write_bytes(b"\xff")
+        linked = root / "dev-util/external-tool"
+    else:
+        outside = outside / "tool-1.ebuild"
+        outside.write_bytes(b"\xff")
+        linked = root / "dev-util/editor/external-1.ebuild"
+    linked.symlink_to(outside)
+
+    code, output = invoke(root, capsys, "--json", *(["--full"] if full else []))
+
+    assert code == 2
+    assert output.out == ""
+    assert str(linked) in output.err
+    assert "symlink" in output.err
+    assert "utf-8" not in output.err  # Reject the link before reading outside bytes.
+
+
+@pytest.mark.parametrize("relative", ["dev-util", "dev-util/editor"])
+@pytest.mark.parametrize("full", [False, True])
+def test_unreadable_inventory_directories_are_errors_not_empty_totals(
+    tmp_path, capsys, relative, full
+):
+    if os.geteuid() == 0:
+        pytest.skip("Root bypasses directory permissions")
+    root = make_overlay(tmp_path)
+    path = root / relative
+    original_mode = path.stat().st_mode
+    try:
+        path.chmod(0)
+        code, output = invoke(root, capsys, "--json", *(["--full"] if full else []))
+        assert code == 2
+        assert output.out == ""
+        assert str(path) in output.err
+        assert "Permission denied" in output.err
+    finally:
+        path.chmod(original_mode)
+
+
+@pytest.mark.parametrize("kind", ["directory-link", "file-link", "unreadable-directory"])
+def test_local_eclass_inventory_fails_closed(tmp_path, capsys, kind):
+    root = make_overlay(tmp_path / "overlay")
+    path = root / "eclass"
+    if kind == "directory-link":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "external.eclass").write_text("# Outside\n")
+        path.symlink_to(outside)
+    else:
+        path.mkdir()
+        if kind == "file-link":
+            path = path / "external.eclass"
+            path.symlink_to(tmp_path / "missing")
+        else:
+            if os.geteuid() == 0:
+                pytest.skip("Root bypasses directory permissions")
+            (path / "hidden.eclass").write_text("# Hidden\n")
+            path.chmod(0)
+    try:
+        code, output = invoke(root, capsys, "--json")
+        assert code == 2
+        assert output.out == ""
+        assert str(path) in output.err
+    finally:
+        if kind == "unreadable-directory":
+            path.chmod(0o755)
+
+
 def test_eapi_is_literal_metadata_and_never_executes_ebuild_or_eclass(tmp_path, capsys):
     root = make_overlay(tmp_path)
     marker = tmp_path / "executed"
@@ -869,6 +985,62 @@ def test_unreadable_configuration_or_policy_is_not_missing(tmp_path, capsys, rel
     assert code == 2
     assert output.out == ""
     assert relative in output.err
+
+
+@pytest.mark.parametrize("linked", [False, True], ids=["fifo", "fifo-symlink"])
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "profiles/repo_name",
+        "profiles/eapi",
+        "metadata/layout.conf",
+        "metadata/update-exclusions.json",
+        "dev-util/editor/editor-1.ebuild",
+        "profiles/package.mask",
+        "profiles/package.mask/nested/blocked",
+    ],
+)
+def test_public_cli_rejects_special_files_without_blocking(tmp_path, relative, linked):
+    parent = make_overlay(tmp_path / "parent")
+    root = make_overlay(parent / "nested", name="nested-overlay")
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    if linked:
+        target = tmp_path / "fifo-target"
+        os.mkfifo(target)
+        path.symlink_to(target)
+    else:
+        os.mkfifo(path)
+    tools = Path(__file__).resolve().parents[1]
+    # A direct isolated interpreter has no launcher children to orphan on timeout.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            (
+                "import sys; sys.path.insert(0, sys.argv.pop(1)); "
+                "from overlay_tools.cli.overlay_info import main; sys.exit(main())"
+            ),
+            str(tools / "src"),
+            "--overlay-path",
+            str(root / "dev-util/editor"),
+            "--json",
+            "--full",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=3,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert str(path) in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "regular file" in result.stderr or "symlink" in result.stderr
 
 
 def test_missing_optional_configuration_and_policy_are_explicit(tmp_path, capsys):
@@ -1235,7 +1407,7 @@ def test_full_configuration_preserves_raw_newlines_in_both_public_formats(
         }
     if mask_is_directory:
         (root / "profiles/package.mask").mkdir()
-        raw["profiles/package.mask/deprecated"] = raw.pop("profiles/package.mask")
+        raw["profiles/package.mask/foo_bar"] = raw.pop("profiles/package.mask")
     for relative, content in raw.items():
         (root / relative).write_bytes(content)
 
@@ -1248,11 +1420,32 @@ def test_full_configuration_preserves_raw_newlines_in_both_public_formats(
     else:
         actual = {}
         for relative in raw:
-            # Text labels keep path keys raw, so underscores stay readable.
             prefix = relative + ": "
             line = next(line.strip() for line in output.out.splitlines() if prefix in line)
             actual[relative] = json.loads(line.removeprefix(prefix))
     assert {relative: actual[relative].encode("utf-8") for relative in raw} == raw
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["text", "json"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_full_masks_are_raw_text_without_atom_syntax_validation(tmp_path, capsys, flags, nested):
+    root = make_overlay(tmp_path)
+    path = root / "profiles/package.mask"
+    if nested:
+        path.mkdir()
+        path = path / "foo_bar"
+    content = "not a valid atom ???\r\n"
+    path.write_bytes(content.encode())
+
+    code, output = invoke(root, capsys, *flags, "--full")
+
+    assert code == 0
+    assert output.err == ""
+    relative = str(path.relative_to(root))
+    if "--json" in flags:
+        assert json.loads(output.out)["full_configuration"][relative] == content
+    else:
+        assert f"{relative}: {json.dumps(content)}" in output.out
 
 
 @pytest.mark.parametrize("mask_is_directory", [False, True])

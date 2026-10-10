@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -11,9 +12,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from overlay_tools.core.ebuilds import find_ebuilds
-from overlay_tools.core.overlay import find_packages
-from overlay_tools.core.update_policy import load_update_exclusions
+from overlay_tools.core.ebuilds import parse_ebuild_filename
+from overlay_tools.core.errors import EbuildParseError
+from overlay_tools.core.overlay import SKIP_DIRS, PackageRef
+from overlay_tools.core.update_policy import EXACT_ATOM_RE, VERSION_SUFFIX_RE, UpdatePolicyError
 
 TOOLS_PATH = ".agents/skills/overlay-tools"
 SUMMARY_ITEMS = 10
@@ -57,28 +59,55 @@ def section(items: list[Any], *, full: bool) -> dict[str, Any]:
 
 
 def read_optional(path: Path) -> str | None:
-    # Reject non-regular files before opening, so a FIFO or device at a
-    # configuration path fails quickly instead of blocking the command.
     try:
-        mode = path.lstat().st_mode
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise ValueError(f"Invalid configuration {path}: {exc}") from exc
-    if stat.S_ISLNK(mode):
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         try:
-            mode = path.stat().st_mode
-        except FileNotFoundError:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError(f"Invalid configuration {path}: expected a regular file")
+            with os.fdopen(descriptor, encoding="utf-8", newline="") as stream:
+                descriptor = -1  # The stream owns and closes the descriptor now.
+                return stream.read()
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    except FileNotFoundError:
+        if path.is_symlink():
             raise ValueError(f"Invalid configuration {path}: broken symlink") from None
-        except OSError as exc:
-            raise ValueError(f"Invalid configuration {path}: {exc}") from exc
-    if not stat.S_ISREG(mode):
-        raise ValueError(f"Invalid configuration {path}: not a regular file")
-    try:
-        with path.open(encoding="utf-8", newline="") as stream:
-            return stream.read()
+        return None
     except (OSError, UnicodeError) as exc:
         raise ValueError(f"Invalid configuration {path}: {exc}") from exc
+
+
+def context_exclusions(path: Path) -> dict[str, str]:
+    """Use maintenance policy rules, but read through the nonblocking file reader."""
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for atom, reason in pairs:
+            if atom in result:
+                raise ValueError(f"duplicate atom {atom!r}")
+            result[atom] = reason
+        return result
+
+    try:
+        content = read_optional(path)
+        if content is None:
+            return {}
+        exclusions = json.loads(content, object_pairs_hook=unique_object)
+        if not isinstance(exclusions, dict):
+            raise UpdatePolicyError(
+                f"Invalid update policy {path}: expected an atom-to-reason object"
+            )
+        validated: dict[str, str] = {}
+        for atom, reason in exclusions.items():
+            if not EXACT_ATOM_RE.fullmatch(atom) or VERSION_SUFFIX_RE.search(atom.split("/")[-1]):
+                raise ValueError(f"{atom!r} must be an exact category/package atom")
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError(f"reason for {atom!r} must be a non-empty string")
+            validated[atom] = reason
+        return validated
+    except ValueError as exc:
+        raise UpdatePolicyError(f"Invalid update policy {path}: {exc}") from exc
 
 
 def read_masks(root: Path) -> dict[str, str | None]:
@@ -101,7 +130,7 @@ def read_masks(root: Path) -> dict[str, str | None]:
                 mode = entry.stat(follow_symlinks=False).st_mode
                 if stat.S_ISDIR(mode):
                     pending.append(path)
-                elif stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+                else:
                     paths.append(path)
     return {str(path.relative_to(root)): read_optional(path) for path in sorted(paths)}
 
@@ -245,9 +274,54 @@ def checkout_git(root: Path) -> dict[str, Any]:
     return result
 
 
+def inventory_entries(path: Path) -> list[tuple[Path, int]]:
+    """Do not suppress inventory scan errors or follow directory/file links."""
+    if path.is_symlink():
+        raise ValueError(f"Invalid inventory {path}: symlink")
+    with os.scandir(path) as entries:
+        return [
+            (path / entry.name, entry.stat(follow_symlinks=False).st_mode)
+            for entry in sorted(entries, key=lambda item: item.name)
+        ]
+
+
+def inventory_packages(root: Path) -> list[tuple[PackageRef, list[Path]]]:
+    packages = []
+    for category, mode in inventory_entries(root):
+        if category.name.startswith(".") or category.name in SKIP_DIRS:
+            continue
+        if stat.S_ISLNK(mode):
+            raise ValueError(f"Invalid inventory {category}: symlink")
+        if not stat.S_ISDIR(mode):
+            continue
+        for package, mode in inventory_entries(category):
+            if package.name.startswith("."):
+                continue
+            if stat.S_ISLNK(mode):
+                raise ValueError(f"Invalid inventory {package}: symlink")
+            if not stat.S_ISDIR(mode):
+                continue
+            ebuilds = []
+            for path, mode in inventory_entries(package):
+                if not path.name.endswith(".ebuild"):
+                    continue
+                if stat.S_ISLNK(mode):
+                    raise ValueError(f"Invalid inventory {path}: symlink")
+                try:
+                    parse_ebuild_filename(path)
+                except EbuildParseError:
+                    continue
+                ebuilds.append(path)
+            if ebuilds:
+                packages.append((PackageRef(category.name, package.name, package), ebuilds))
+    return packages
+
+
 def literal_eapi(path: Path) -> str | None:
     """Read only the first non-comment line, never evaluate shell expressions."""
-    content = path.read_text(encoding="utf-8")
+    content = read_optional(path)
+    if content is None:
+        raise ValueError(f"Invalid inventory {path}: ebuild disappeared")
     for line in content.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -296,37 +370,27 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
     profile_eapi = profile_content.strip() if profile_content is not None else None
     if profile_eapi is not None and not re.fullmatch(r"[0-9]{1,3}", profile_eapi):
         raise ValueError(f"Invalid configuration {profile_eapi_path}: expected an EAPI number")
-    packages = sorted(find_packages(root), key=lambda package: package.atom)
-    # Inventory must stay inside the checkout. find_packages follows category
-    # and package symlinks, so reject any discovered package whose resolved
-    # directory escapes the overlay root before reporting.
-    root_resolved = root.resolve()
-    for package in packages:
-        if not package.path.resolve().is_relative_to(root_resolved):
-            raise ValueError(f"Invalid overlay {root}: package {package.atom} escapes the checkout")
+    packages = sorted(inventory_packages(root), key=lambda item: item[0].atom)
     eapis: Counter[str] = Counter()
     unresolved_eapis = 0
     categories: Counter[str] = Counter()
     category_ebuilds: Counter[str] = Counter()
     policy_path = root / "metadata/update-exclusions.json"
-    if policy_path.is_symlink() and not policy_path.exists():
-        raise ValueError(f"Invalid update policy {policy_path}: broken symlink")
-    exclusions = load_update_exclusions(root)
+    exclusions = context_exclusions(policy_path)
     package_items = []
     ebuild_paths: list[str] = []
-    for package in packages:
-        ebuilds = find_ebuilds(package.path)
-        ebuild_paths.extend(str(ebuild.path.relative_to(root)) for ebuild in ebuilds)
+    for package, ebuilds in packages:
+        ebuild_paths.extend(str(path.relative_to(root)) for path in ebuilds)
         package_items.append({"atom": package.atom, "ebuild_count": len(ebuilds)})
         categories[package.category] += 1
         category_ebuilds[package.category] += len(ebuilds)
-        for ebuild in ebuilds:
-            value = literal_eapi(ebuild.path)
+        for path in ebuilds:
+            value = literal_eapi(path)
             if value is None:
                 unresolved_eapis += 1
             else:
                 eapis[value] += 1
-    atoms = {package.atom for package in packages}
+    atoms = {package.atom for package, _ in packages}
     policy_items = [
         {
             "atom": atom,
@@ -339,7 +403,20 @@ def generate_context(start: Path, *, full: bool = False) -> dict[str, Any]:
     ]
     active_items = [item for item in policy_items if item["active"]]
     eclass_dir = root / "eclass"
-    eclasses = sorted(path.name for path in eclass_dir.glob("*.eclass") if path.is_file())
+    eclasses = []
+    try:
+        eclass_mode = eclass_dir.lstat().st_mode
+    except FileNotFoundError:
+        pass
+    else:
+        if not stat.S_ISDIR(eclass_mode):
+            raise ValueError(f"Invalid inventory {eclass_dir}: expected a real directory")
+        for path, mode in inventory_entries(eclass_dir):
+            if not path.name.endswith(".eclass"):
+                continue
+            if not stat.S_ISREG(mode):
+                raise ValueError(f"Invalid inventory {path}: expected a regular non-link file")
+            eclasses.append(path.name)
     context = {
         "schema_version": 1,
         "mode": "full" if full else "summary",
