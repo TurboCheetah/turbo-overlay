@@ -75,6 +75,26 @@ This file controls maintenance automation only. `profiles/package.mask`
 controls Portage package selection independently; a mask alone does not stop
 updates, and an update exclusion does not mask or uninstall a package.
 
+### Read-only local QA
+
+```bash
+.agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/checkout category/package
+.agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/checkout --changed-since origin/master --json
+```
+
+`qa-ebuild` reuses the tools `.venv` without downloads or installation. It checks
+local Manifest records, metadata XML, cache presence and ebuild fingerprints,
+and Bash syntax without sourcing package code. Remote DIST bytes and expanded
+metadata stay unchecked. Exit `0` means the selected local checks passed, `1`
+means findings, and `2` means invalid input, unavailable tools or an empty scan.
+
+The `qa-ebuild-info` pre-commit hook displays the actual report but is
+informational. Its wrapper exit `0` is not package PASS. CI uses the same local
+checks as an authoritative gate for exactly changed package inputs. A tooling-only
+change prints `not applicable: no package targets changed`, never package PASS.
+Neither integration enables pkgcheck. See [QA contracts and safety](docs/qa-ebuild.md)
+for selection, coverage, first-push behavior and the trusted external opt-in.
+
 ### Test an exact ebuild in Docker
 
 ```bash
