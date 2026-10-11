@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OVERLAY_TOOLS_DIR="$(dirname "${SCRIPT_DIR}")"
+PYTHON="${OVERLAY_TOOLS_DIR}/.venv/bin/python"
+
+# Do not let a preview or write implicitly install dependencies or access a network.
+if [[ ! -x "${PYTHON}" ]]; then
+    printf '%s\n' 'error: the overlay-tools virtualenv is not prepared' >&2
+    printf 'setup separately: cd %q && uv sync --locked --group dev\n' "${OVERLAY_TOOLS_DIR}" >&2
+    exit 127
+fi
+
+# Ignore caller imports and pin source to this launcher, not an editable install.
+exec "${PYTHON}" -I -B -c '
+import importlib.util
+import sys
+from pathlib import Path
+
+source = Path(sys.argv.pop(1)).resolve()
+sys.path.insert(0, str(source))
+spec = importlib.util.find_spec("overlay_tools")
+if spec is None or spec.origin != str(source / "overlay_tools" / "__init__.py"):
+    sys.exit("error: cannot load overlay-tools from the launcher checkout")
+from overlay_tools.cli.create_ebuild import main
+
+sys.exit(main())
+' "${OVERLAY_TOOLS_DIR}/src" "$@"
