@@ -161,6 +161,17 @@ overlay-tools/
 └── tests/
 ```
 
+## Checkout context
+
+From the repository root, use
+`.agents/skills/overlay-tools/bin/overlay-info --overlay-path /path/to/checkout --json`
+to inspect current inventory, policy, configuration and Git identity without a
+persistent cache.
+Read [the context guide](docs/overlay-info.md) for summary truncation, unchecked
+Git state and the opt-in `--full` configuration/mask dump. Provision the tools
+environment first; inspection does not sync dependencies. This output is context,
+not a QA or build verdict.
+
 ## Environment Variables
 
 | Variable | Description |
