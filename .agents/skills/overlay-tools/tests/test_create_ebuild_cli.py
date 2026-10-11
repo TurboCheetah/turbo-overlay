@@ -189,6 +189,8 @@ def test_keyword_override_is_literal_and_not_host_detected(overlay, capsys, keyw
         ("--upstream-url", "https://EXAMPLE.org/file"),
         ("--upstream-url", "https://example.org/%2e%2e/file"),
         ("--upstream-url", "https://example.org/file%0a"),
+        ("--upstream-url", "https://-bad.example.org/file"),
+        ("--upstream-url", "https://bad-.example.org/file"),
         ("--homepage", "https://example.org/`id`"),
         ("--maintainer-email", "bad-email"),
         ("--maintainer-email", "owner@example.org\n<name>injected</name>"),
@@ -216,6 +218,24 @@ def test_invalid_input_is_rejected_before_any_artifact(overlay, capsys, field, v
     assert result != 0
     assert capsys.readouterr().err
     assert sorted(path.name for path in overlay.iterdir()) == ["metadata", "profiles"]
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://xn--p1ai/",
+        "https://xn--bcher-kva.de/",
+        "https://my--host.com/",
+        "https://a-b-c.example.org/",
+    ],
+)
+def test_punycode_and_interior_dash_hosts_are_accepted(overlay, capsys, host):
+    args = arguments(overlay)
+    args[args.index("--homepage") + 1] = host
+    assert invoke(args) == 0
+    out = capsys.readouterr().out
+    assert f"HOMEPAGE='{host}'" in out
+    assert not (overlay / "dev-util").exists()
 
 
 @pytest.mark.parametrize("root_kind", ["missing", "empty", "subdir"])

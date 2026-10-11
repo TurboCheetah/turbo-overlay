@@ -105,8 +105,10 @@ This initial interface intentionally accepts a conservative subset:
 - Licenses are one or more space-separated identifiers. License groups,
   conditional expressions and `||` are not supported. This checks syntax,
   not availability in the overlay/master or permission to redistribute.
-- URLs are literal canonical HTTPS URLs with lowercase DNS-style hosts. No
-  credentials, port, fragment, Bash expansion, shell quotes, whitespace,
+- URLs are literal canonical HTTPS URLs with lowercase DNS-style hosts. Host
+  labels may contain interior dashes, so punycode/IDN hosts such as
+  `https://xn--p1ai/` are accepted; a label may not start or end with a dash.
+  No credentials, port, fragment, Bash expansion, shell quotes, whitespace,
   control characters or dot path segments are accepted. Percent escapes must
   decode to the same restricted character set. Use an immutable, release-specific
   URL, not `${PV}` interpolation or a mutable latest-release endpoint. The tool

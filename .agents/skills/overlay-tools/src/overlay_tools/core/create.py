@@ -164,7 +164,10 @@ def validate_url(value: str) -> None:
         or not parts.hostname
         or parts.netloc != parts.hostname
         or parts.fragment
-        or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", parts.hostname)
+        or not re.fullmatch(
+            r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*",
+            parts.hostname,
+        )
         or urlunsplit(parts) != value
         or re.search(r"%(?![A-Fa-f0-9]{2})", value)
         or not re.fullmatch(allowed, unquote(value))
