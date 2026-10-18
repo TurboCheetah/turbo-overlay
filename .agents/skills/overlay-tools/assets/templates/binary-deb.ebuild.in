@@ -1,0 +1,32 @@
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+EAPI=8
+
+inherit unpacker
+
+# STARTER ONLY: generic .deb layout, not complete Electron/browser packaging.
+DESCRIPTION=@@DESCRIPTION@@
+HOMEPAGE=@@HOMEPAGE@@
+SRC_URI="@@UPSTREAM_URL@@ -> ${P}.deb"
+S="${WORKDIR}"
+
+LICENSE=@@LICENSE@@
+SLOT="0"
+KEYWORDS=@@KEYWORDS@@
+RESTRICT="mirror strip"
+QA_PREBUILT=@@QA_PREBUILT@@
+
+# TODO: determine runtime dependencies, bundled libraries and /opt layout.
+# TODO: review sandbox permissions, desktop files, icons and license assets.
+# This assumes a standalone usr/bin binary. Do not copy an entire deb filesystem.
+src_unpack() {
+	unpacker_src_unpack
+}
+
+src_configure() { :; }
+src_compile() { :; }
+
+src_install() {
+	newbin "${S}/usr/bin/@@BINARY_NAME@@" @@BINARY_QUOTED@@
+}
