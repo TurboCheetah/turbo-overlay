@@ -65,6 +65,7 @@ src_unpack() {
 }
 
 src_prepare() {
+	default
 	pushd "opt/Hayase/locales" >/dev/null || die
 	chromium_remove_language_paks
 	popd >/dev/null || die
