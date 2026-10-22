@@ -411,6 +411,99 @@ def public_launcher(tmp_path: Path, name: str) -> Path:
     return launcher
 
 
+def fault_launcher(tmp_path: Path, name: str, source: str) -> Path:
+    """Inject only OS/Python I/O faults in a separate trusted launcher environment."""
+    launcher = public_launcher(tmp_path, name)
+    environment = launcher.parent.parent / ".venv"
+    environment.unlink()
+    venv.EnvBuilder(with_pip=False).create(environment)
+    site_packages = next((environment / "lib").glob("python*/site-packages"))
+    (site_packages / "dependencies.pth").write_text(sysconfig.get_path("purelib") + "\n")
+    (site_packages / "qa_read_fault.py").write_text(source)
+    (site_packages / "qa_read_fault.pth").write_text("import qa_read_fault\n")
+    return launcher
+
+
+@pytest.mark.parametrize("name", ["qa-ebuild", "qa-ebuild-check"])
+@pytest.mark.parametrize(
+    "location, check",
+    [
+        ("metadata/layout.conf", "selection"),
+        ("dev-util/adapter/Manifest", "manifest_local"),
+        ("dev-util/adapter/metadata.xml", "metadata_xml"),
+        ("dev-util/adapter/files/adapter.patch", "manifest_local"),
+        ("metadata/md5-cache/dev-util/adapter-1", "cache"),
+        ("dev-util/adapter/adapter-1.ebuild", "cache"),
+    ],
+)
+def test_real_launchers_reject_regular_file_replaced_by_fifo_without_blocking(
+    tmp_path, name, location, check
+):
+    root = make_overlay(tmp_path / "repo", thin=check == "cache")
+    target = root / location
+    marker = tmp_path / "READ_RACE_TRIGGERED"
+    source = (
+        "import io, os\nfrom pathlib import Path\n"
+        f"target = Path({str(target)!r})\nmarker = Path({str(marker)!r})\n"
+        "armed = True\n"
+        "def replace(path):\n"
+        "    global armed\n"
+        "    if armed and not isinstance(path, int) and os.fspath(path) == str(target):\n"
+        "        armed = False\n"
+        "        target.unlink()\n"
+        "        os.mkfifo(target)\n"
+        "        marker.write_text('regular-to-fifo')\n"
+        "original_io_open = io.open\noriginal_os_open = os.open\n"
+        "def io_open(path, *args, **kwargs):\n"
+        "    replace(path)\n"
+        "    return original_io_open(path, *args, **kwargs)\n"
+        "def os_open(path, *args, **kwargs):\n"
+        "    replace(path)\n"
+        "    return original_os_open(path, *args, **kwargs)\n"
+        "io.open = io_open\nos.open = os_open\n"
+    )
+    launcher = fault_launcher(tmp_path, name, source)
+    args = (
+        ["--all", "--json"] if name == "qa-ebuild" else ["--informational", "metadata/layout.conf"]
+    )
+    before = snapshot(root)
+    # The input is a real FIFO with no writer. The old path read blocks until killed.
+    result = subprocess.run(
+        [str(launcher), "--overlay-path", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=3,
+    )
+    assert marker.read_text() == "regular-to-fifo"
+    assert result.returncode == (2 if name == "qa-ebuild" else 0), result.stdout + result.stderr
+    assert "Traceback" not in result.stdout + result.stderr
+    if name == "qa-ebuild":
+        report = json.loads(result.stdout)
+        assert report["status"] == "INCONCLUSIVE"
+        assert report["inconclusive"] is True
+        assert report["examined_count"] == 0
+        assert report["selected_count"] == 1
+        assert report["selected_packages"] == ["dev-util/adapter"]
+        assert report["findings"][-1]["path"] == str(target)
+        assert "regular" in report["findings"][-1]["message"].lower()
+        assert report["coverage"]["bash_syntax"] == "not-run"
+        if check in {"cache", "metadata_xml"}:
+            assert report["package_coverage"]["dev-util/adapter"][check] == "unchecked"
+    else:
+        assert "INCONCLUSIVE: examined 0 package(s)" in result.stdout
+        assert str(target) in result.stdout
+        assert "authoritative QA exit: 2; informational wrapper exit: 0" in result.stdout
+        assert "PASS:" not in result.stdout
+    # Only the injected replacement changes fixture inputs; QA writes nothing.
+    after = checkout_state(root)
+    assert after[location][2] is None
+    after.pop(location)
+    assert {key: value[2] for key, value in after.items() if value[2] is not None} == {
+        key: value for key, value in before.items() if key != location
+    }
+
+
 @pytest.mark.parametrize("name", ["qa-ebuild", "qa-ebuild-check"])
 @pytest.mark.parametrize("configuration", ["default", "local", "include", "worktree"])
 @pytest.mark.parametrize("change", ["staged", "unstaged", "staged-and-restored"])
@@ -934,6 +1027,69 @@ def test_interruption_keeps_later_packages_unchecked_in_json_and_human_output(tm
             f"input_environment: {cache}: Package dev-util/middle scan incomplete" in result.stdout
         )
         assert "authoritative QA exit: 2; informational wrapper exit: 0" in result.stdout
+        assert "PASS:" not in result.stdout
+    assert snapshot(root) == before
+
+
+@pytest.mark.parametrize("name", ["qa-ebuild", "qa-ebuild-check"])
+@pytest.mark.parametrize(
+    "present, expected",
+    [((False, False), "unchecked"), ((False, True), "partial"), ((True, False), "partial")],
+    ids=["all-missing", "missing-first", "missing-last"],
+)
+@pytest.mark.parametrize("other_package", ["none", "before", "after", "missing"])
+def test_public_missing_cache_coverage_never_claims_all_fingerprints_checked(
+    tmp_path, name, present, expected, other_package
+):
+    root = make_overlay(tmp_path / "repo", thin=True)
+    add_version(root, "dev-util/adapter", 2)
+    missing = []
+    for version, exists in enumerate(present, 1):
+        cache = root / f"metadata/md5-cache/dev-util/adapter-{version}"
+        if not exists:
+            cache.unlink()
+            missing.append(cache)
+    other = None
+    if other_package != "none":
+        other = "dev-util/abefore" if other_package == "before" else "dev-util/zafter"
+        make_overlay(root, thin=True, atom=other)
+        if other_package == "missing":
+            cache = root / "metadata/md5-cache" / (other + "-1")
+            cache.unlink()
+            missing.append(cache)
+    launcher = public_launcher(tmp_path, name)
+    args = (
+        ["--all", "--json"] if name == "qa-ebuild" else ["--informational", "metadata/layout.conf"]
+    )
+    before = snapshot(root)
+    result = subprocess.run(
+        [str(launcher), "--overlay-path", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    aggregate = "partial" if other_package in {"before", "after"} else expected
+    assert result.returncode == (1 if name == "qa-ebuild" else 0), result.stdout + result.stderr
+    assert "Traceback" not in result.stdout + result.stderr
+    if name == "qa-ebuild":
+        report = json.loads(result.stdout)
+        assert report["status"] == "FAIL"
+        assert report["inconclusive"] is False
+        assert report["examined_count"] == report["selected_count"] == (2 if other else 1)
+        assert report["coverage"]["cache"] == aggregate
+        assert report["package_coverage"]["dev-util/adapter"]["cache"] == expected
+        if other:
+            assert report["package_coverage"][other]["cache"] == (
+                "unchecked" if other_package == "missing" else "checked-local-ebuild-fingerprints"
+            )
+        assert sorted(finding["path"] for finding in report["findings"]) == sorted(
+            map(str, missing)
+        )
+        assert all(finding["message"] == "Missing metadata cache" for finding in report["findings"])
+    else:
+        assert f"'cache': '{aggregate}'" in result.stdout
+        assert "authoritative QA exit: 1; informational wrapper exit: 0" in result.stdout
         assert "PASS:" not in result.stdout
     assert snapshot(root) == before
 

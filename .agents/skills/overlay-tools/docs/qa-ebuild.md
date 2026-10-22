@@ -1,6 +1,6 @@
 # Local read-only QA with qa-ebuild
 
-`bin/qa-ebuild` checks local package files without installing dependencies,
+By default, `bin/qa-ebuild` checks local package files without installing dependencies,
 regenerating metadata or Manifests, sourcing ebuilds, or fetching distfiles.
 The launchers require a trusted `python3` 3.11+ on `PATH`, `/usr/bin/env` with
 `-S` support, and the provisioned overlay-tools `.venv`. Bash is required only
@@ -70,7 +70,11 @@ examined. Changes to layout configuration, profiles or eclasses select all
 current packages because they can affect shared behavior. Cache changes map to
 current package atoms. Untracked files do not select packages through Git diff;
 `skipped` lists them. Use explicit targets or `--all` to include a new package.
-Untracked files inside an already selected package are still locally checked.
+Untracked files inside an already selected package receive the applicable local
+checks, not blanket content validation. Every selected package-tree path receives
+safety validation. Full Manifests require records for local files, but thin
+Manifests do not. In particular, an unrecorded AUX file in a thin package receives
+path validation only; the tool does not read or validate its content or checksum.
 Git commands disable external diff, textconv, hooks, fsmonitor, untracked-cache
 writes, automatic diff index refresh and optional index locks. Every command
 passes `-c diff.autoRefreshIndex=false`, overriding local, included and worktree
@@ -114,6 +118,7 @@ inputs. Use explicit targets or `--all` instead, neither of which invokes Git.
   This works for packages with an empty or absent SRC_URI as well.
 - `thin-manifests = true` in `metadata/layout.conf` does not require absent local
   records. Any local records that are present still get size/hash checks.
+  Unrecorded AUX files get path validation only, not content or checksum checks.
   A thin Manifest may be absent, including for packages with no distfiles.
   The tool does not infer that SRC_URI is empty or that DIST records are complete.
   Coverage reports `thin-records-only` for a present Manifest, or `unchecked` when
@@ -140,7 +145,7 @@ Patch application is deliberately not inferred from comments, quoted strings,
 The authorized repository policy is two previous versions plus the new version.
 
 Remote DIST bytes are always **unchecked**. A PASS means only the selected local
-checks passed. It does not prove fetchability, expanded metadata correctness,
+checks applicable to the selected files passed. It does not prove fetchability, expanded metadata correctness,
 patch application, build success or install/runtime correctness.
 
 ## Optional pkgcheck
@@ -212,12 +217,30 @@ push and runs `--initial` to check every current package. It does not create an
 empty-tree object or alter Git. Neither integration opts into external pkgcheck.
 Existing ruff, formatting, type and pytest CI gates remain in place.
 
+Each push run uses a concurrency group containing its workflow name, event name
+and `github.run_id`. A later push therefore neither cancels its running check nor
+replaces it in the same concurrency group's pending queue. This matters because
+push B compares against push A's tip: B's diff need not contain A's package
+changes. Merely setting `cancel-in-progress: false` on a shared branch group is
+insufficient. GitHub's default queue replaces an older pending run when a third
+run joins that group. PR runs use their stable pull-request ref and still cancel
+superseded runs for the same PR. A retry retains its original run ID and group;
+it cannot replace a different push's run.
+
+This policy prevents cancellation and pending replacement by this workflow's
+concurrency configuration. It does not guarantee runner availability or success,
+prevent manual cancellation, or control another workflow's concurrency settings.
+See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+
 Controller tests execute the public adapter, the exact local hook with the real
 pre-commit runner, and the workflow's shell body under PR, push, first-push,
 findings, missing-tool, missing-base and hostile-input conditions. The local-hook
 replay extracts the same hook configuration without initializing the unrelated
 remote ruff hook. YAML parsing and shell replay do not prove a live Actions run;
-run actionlint too when available.
+run actionlint too when available. Local concurrency tests evaluate the exact
+workflow expressions and model GitHub's default single-pending queue. They replay
+three distinct push diffs, including an earlier finding absent from later diffs.
+This is regression coverage, not a live GitHub scheduling test.
 
 ## Reports and exits
 

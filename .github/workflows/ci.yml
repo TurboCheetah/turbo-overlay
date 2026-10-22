@@ -31,8 +31,10 @@ on:
       - eclass/**
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Each push owns its before..tip diff; later pushes must not replace its run.
+  # PR runs still supersede earlier runs for the same pull-request ref.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

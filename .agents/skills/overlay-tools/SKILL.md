@@ -122,7 +122,7 @@ ebuilds and Manifests; do not automatically uninstall existing packages.
 
 ### qa-ebuild
 
-Run local read-only QA before a phase test, using an explicit checkout path.
+Run default local read-only QA before a phase test, using an explicit checkout path.
 
 ```bash
 .agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/pr-checkout category/package
@@ -130,11 +130,15 @@ Run local read-only QA before a phase test, using an explicit checkout path.
 ```
 
 Read [the QA contract](docs/qa-ebuild.md) before interpreting a result. Exit `0`
-means the selected local checks passed, `1` means findings, and `2` means an
+means the applicable selected local checks passed, `1` means findings, and `2` means an
 inconclusive or empty scan. Remote DIST bytes and expanded metadata are unchecked.
-The command reuses the existing tools `.venv`; it never resolves dependencies,
-sources package code or regenerates caches or Manifests. Missing environment is
-inconclusive. Do not repair baseline caches merely to make this check green.
+The default command reuses the existing tools `.venv`; it never resolves
+dependencies, sources package code or regenerates caches or Manifests. Missing
+environment is inconclusive. Provision it once as a separate setup step, not
+during a scan, using the command in [the README](README.md#read-only-local-qa).
+Thin Manifests do not require local records; in thin mode an unrecorded AUX file
+receives path validation only, not content or checksum checks. Do not repair
+baseline caches merely to make this check green.
 
 Keep the integrations distinct. The verbose `qa-ebuild-info` pre-commit hook is
 informational and displays the authoritative QA status while its wrapper exits
@@ -142,10 +146,13 @@ informational and displays the authoritative QA status while its wrapper exits
 failures nonzero, and prints `not applicable: no package targets changed` for a
 successful selection with no current targets. Shared layout, profile and eclass
 changes select all current packages. An initial push checks all packages rather
-than inventing a base. Keep GitHub inputs in step environment variables and
-replay the actual workflow body when changing this integration. Neither hook nor
-CI enables pkgcheck. `--pkgcheck` is a separate trusted-code opt-in and may execute
-metadata generation through the external tool.
+rather than inventing a base. Each push uses a separate concurrency group to
+preserve its own diff check; runs for the same PR can still supersede each other.
+Keep GitHub inputs in step environment variables and replay the actual workflow
+body when changing this integration. Neither hook nor CI enables pkgcheck.
+`--pkgcheck` is a separate trusted-code opt-in. External pkgcheck/pkgcore may source
+ebuilds and write metadata caches, so the default no-execution/read-only guarantee
+does not extend to that opt-in.
 
 ### test-ebuild
 

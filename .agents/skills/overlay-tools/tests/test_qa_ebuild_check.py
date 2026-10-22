@@ -284,8 +284,159 @@ def test_ci_bad_base_is_inconclusive_not_not_applicable(tmp_path, base):
     assert not (root / "INJECTED").exists()
 
 
+def ci_workflow():
+    return yaml.load(
+        (TOOLS.parents[2] / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+
+
+def concurrency_value(template, context):
+    """Evaluate the small Actions expression subset used by this workflow.
+
+    Read the actual YAML expression, rather than modeling a separate desired key.
+    Unsupported syntax fails closed so a changed expression requires test review.
+    """
+
+    def value(expression):
+        alternatives = expression.strip().split(" || ")
+        if len(alternatives) > 1:
+            result = False
+            for alternative in alternatives:
+                result = value(alternative)
+                if result:
+                    break
+            return result
+        operands = expression.strip().split(" && ")
+        if len(operands) > 1:
+            result = True
+            for operand in operands:
+                result = value(operand)
+                if not result:
+                    break
+            return result
+        comparison = expression.strip().split(" == ")
+        if len(comparison) == 2:
+            return value(comparison[0]) == value(comparison[1])
+        token = expression.strip()
+        if token in {"true", "false"}:
+            return token == "true"
+        if re.fullmatch(r"'[^']*'", token):
+            return token[1:-1]
+        assert re.fullmatch(r"github\.[a-z_]+", token), expression
+        return context[token.removeprefix("github.")]
+
+    exact = re.fullmatch(r"\$\{\{([^{}]*)\}\}", template)
+    if exact:
+        return value(exact[1])
+    return re.sub(r"\$\{\{(.*?)\}\}", lambda match: str(value(match[1])), template)
+
+
+def ci_concurrency(event, run_id, ref="refs/heads/master", workflow="ci"):
+    context = {"workflow": workflow, "event_name": event, "run_id": run_id, "ref": ref}
+    concurrency = ci_workflow()["concurrency"]
+    return (
+        concurrency_value(concurrency["group"], context),
+        concurrency_value(concurrency["cancel-in-progress"], context),
+    )
+
+
+def test_ci_push_runs_do_not_share_a_concurrency_group():
+    # Three overlapping pushes must not replace either running or pending work.
+    runs = [ci_concurrency("push", run_id) for run_id in [101, 102, 103]]
+    assert len({group for group, _cancel in runs}) == 3
+    assert all(cancel is False for _group, cancel in runs)
+
+
+def test_ci_pr_runs_still_cancel_only_the_same_pull_request():
+    first = ci_concurrency("pull_request", 201, ref="refs/pull/125/merge")
+    updated = ci_concurrency("pull_request", 202, ref="refs/pull/125/merge")
+    other_pr = ci_concurrency("pull_request", 203, ref="refs/pull/126/merge")
+    assert first == updated
+    assert first[1] is True
+    assert first[0] != other_pr[0]
+    assert first[0] != ci_concurrency("push", 201)[0]
+    assert (
+        first[0]
+        != ci_concurrency(
+            "pull_request", 201, ref="refs/pull/125/merge", workflow="other-workflow"
+        )[0]
+    )
+
+
+def test_ci_push_retry_reuses_only_its_own_run_group():
+    assert ci_concurrency("push", 101) == ci_concurrency("push", 101)
+    assert ci_concurrency("push", 101)[0] != ci_concurrency("push", 102)[0]
+    assert ci_concurrency("push", 101)[1] is False
+
+
+def pending_pushes(runs):
+    """Model Actions' default single-pending queue, not live GitHub execution."""
+    groups = {}
+    for run_id, group, cancel in runs:
+        if group not in groups or cancel:
+            groups[group] = [run_id]
+        else:
+            groups[group] = [groups[group][0], run_id]
+    return {run_id for members in groups.values() for run_id in members}
+
+
+def test_overlapping_pushes_replay_every_distinct_package_diff(tmp_path):
+    root = make_overlay(tmp_path / "repo", thin=True)
+    atoms = ["dev-util/adapter", "dev-util/other", "dev-util/third"]
+    for atom in atoms[1:]:
+        make_overlay(root, thin=True, atom=atom)
+    base = initialize(root)
+    runs = []
+    for index, atom in enumerate(atoms):
+        # Push A introduces a finding. B and C do not modify A's package.
+        (root / atom / "metadata.xml").write_text("<broken>" if index == 0 else "<pkgmetadata/>")
+        git(root, "add", ".")
+        git(
+            root,
+            "-c",
+            "user.name=QA",
+            "-c",
+            "user.email=qa@example.invalid",
+            "commit",
+            "-qm",
+            f"push {index}",
+        )
+        tip = git(root, "rev-parse", "HEAD")
+        checkout = tmp_path / f"push-{index}"
+        shutil.copytree(root, checkout)
+        source = checkout / ".agents/skills/overlay-tools"
+        source.parent.mkdir(parents=True)
+        source.symlink_to(TOOLS, target_is_directory=True)
+        result = subprocess.run(
+            ["bash", "-c", ci_step()["run"]],
+            cwd=checkout,
+            env={
+                **os.environ,
+                "QA_EVENT_NAME": "push",
+                "QA_PUSH_BEFORE": base,
+                "QA_PR_BASE": "$(touch INJECTED)",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == (1 if index == 0 else 0), result.stdout + result.stderr
+        assert f"{'FAIL' if index == 0 else 'PASS'}: examined 1 package(s)" in result.stdout
+        assert atom in result.stdout
+        assert all(other not in result.stdout for other in atoms if other != atom)
+        assert not (checkout / "INJECTED").exists()
+        group, cancel = ci_concurrency("push", 101 + index)
+        runs.append((101 + index, group, cancel))
+        base = tip
+
+    assert pending_pushes(runs) == {101, 102, 103}
+    # These controls prove why merely disabling active cancellation is insufficient.
+    assert pending_pushes([(n, "ci-master", True) for n in [101, 102, 103]]) == {103}
+    assert pending_pushes([(n, "ci-master", False) for n in [101, 102, 103]]) == {101, 103}
+
+
 def ci_step():
-    workflow = yaml.safe_load((TOOLS.parents[2] / ".github/workflows/ci.yml").read_text())
+    workflow = ci_workflow()
     return next(
         step
         for step in workflow["jobs"]["overlay-tools"]["steps"]

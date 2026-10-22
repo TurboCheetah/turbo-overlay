@@ -31,10 +31,29 @@ class QAReadError(QAInputError):
 
 
 def read_bytes(path: Path, check: str) -> bytes:
+    """Read one regular file without blocking on a swapped special file.
+
+    Validation in ``safe_path`` and the read are not atomic, so open
+    nonblocking and require the opened descriptor itself to be a regular file.
+    A concurrent swap to a FIFO or device then fails closed instead of hanging
+    the scan; ordinary file symlinks keep working because the link target is
+    what the descriptor refers to.
+    """
     try:
-        return path.read_bytes()
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
     except OSError as exc:
         raise QAReadError(path, check, exc) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise QAReadError(path, check, OSError("not a regular file"))
+        chunks = []
+        while chunk := os.read(descriptor, 1 << 20):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    except OSError as exc:
+        raise QAReadError(path, check, exc) from exc
+    finally:
+        os.close(descriptor)
 
 
 def read_text(path: Path, check: str) -> str:
@@ -447,11 +466,12 @@ def check_package(
     check_manifest(package, report, thin, manifest_data)
     ebuilds = sorted(package.glob("*.ebuild"))
     cache_dir = root / "metadata/md5-cache" / package.parent.name
+    caches_checked = 0
     for ebuild in ebuilds:
         cache = cache_dir / ebuild.stem
         if not cache.is_file():
             report.add("cache", cache, "Missing metadata cache")
-            report.coverage["cache"] = "partial"
+            report.coverage["cache"] = "partial" if caches_checked else "unchecked"
             continue
         values = {}
         for line in read_text(cache, "cache").splitlines():
@@ -465,6 +485,7 @@ def check_package(
             report.add("cache", cache, "Missing or malformed _md5_ cache fingerprint")
         elif digest != hashlib.md5(read_bytes(ebuild, "cache")).hexdigest():
             report.add("cache", cache, "Stale ebuild _md5_ cache fingerprint")
+        caches_checked += 1
         report.coverage["cache"] = "partial"
     if cache_dir.is_dir():
         expected = {ebuild.stem for ebuild in ebuilds}
@@ -475,7 +496,13 @@ def check_package(
                 and cache.name not in expected
             ):
                 report.add("cache", cache, "Orphan metadata cache without an ebuild")
-    report.coverage["cache"] = "checked-local-ebuild-fingerprints"
+    report.coverage["cache"] = (
+        "checked-local-ebuild-fingerprints"
+        if caches_checked == len(ebuilds)
+        else "partial"
+        if caches_checked
+        else "unchecked"
+    )
     for ebuild in ebuilds:
         check_ebuild(root, ebuild, report)
 
@@ -701,7 +728,9 @@ def run_local(root: Path, packages: list[str], report: Report) -> None:
             path = exc.path if isinstance(exc, QAReadError) else exc.filename or str(root / atom)
             if isinstance(exc, QAReadError):
                 local.coverage[exc.check] = (
-                    "unchecked" if local.coverage[exc.check] == "not-run" else "partial"
+                    "unchecked"
+                    if local.coverage[exc.check] in {"not-run", "unchecked"}
+                    else "partial"
                 )
                 if exc.check == "ebuild_advisory" and local.coverage["bash_syntax"] == "checked":
                     local.coverage["bash_syntax"] = "partial"
