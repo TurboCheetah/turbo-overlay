@@ -10,5 +10,5 @@ RDEPEND=app-accessibility/at-spi2-core:2 dev-libs/expat dev-libs/glib:2 dev-libs
 RESTRICT=strip
 SLOT=0
 SRC_URI=https://github.com/mifi/lossless-cut/releases/download/v3.69.0/LosslessCut-linux-x86_64.AppImage -> lossless-cut-3.69.0.AppImage https://raw.githubusercontent.com/mifi/lossless-cut/v3.69.0/no.mifi.losslesscut.appdata.xml -> lossless-cut-3.69.0-metainfo.xml
-_eclasses_=desktop	26d57169ca094c04be416993844ec8bc	xdg	3ef49a87c52c8b77c476351195dfe575	xdg-utils	42869b3c8d86a70ef3cf75165a395e09
-_md5_=4362d5984d266668e41da307119ee452
+_eclasses_=desktop	e447b5f77146d69797e9f03ff177f3f1	xdg	3ef49a87c52c8b77c476351195dfe575	xdg-utils	42869b3c8d86a70ef3cf75165a395e09
+_md5_=3acac6e230ff6ef423a58125449b6d8c
