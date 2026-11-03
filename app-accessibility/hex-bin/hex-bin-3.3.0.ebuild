@@ -42,6 +42,8 @@ QA_PREBUILT="usr/bin/hex"
 
 src_install() {
 	dobin usr/bin/hex
+	insinto /usr/share/licenses/${PN}
+	doins usr/share/licenses/hex/LICENSE
 
 	domenu usr/share/applications/anomaly.hex.desktop
 	local size
