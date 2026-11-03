@@ -146,7 +146,9 @@ Build once (`--build`); subsequent calls reuse the local Docker image and exit 2
 if it is missing. `docker/run-ebuild` is mounted from the checkout on each run,
 so script changes do not need a rebuild. Use an
 explicit PR checkout path rather than whichever branch happens to be current.
-The overlay is bind-mounted read-only; Portage's distfiles, workdir and image
+The overlay is bind-mounted read-only and copied inside the container into a
+world-readable tree (without `.git` or `.venv`), so host permissions such as a
+umask 077 checkout do not matter; Portage's distfiles, workdir and image
 are ephemeral. An exit code of zero means fetch/Manifest validation and
 unpack→install phases succeeded and the requested staged paths exist. It does
 **not** prove that RDEPEND is complete, the package is installed, or its GUI

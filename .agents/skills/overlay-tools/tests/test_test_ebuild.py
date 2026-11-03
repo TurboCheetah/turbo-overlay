@@ -89,11 +89,13 @@ def test_build_and_run_mount_readonly(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert build[build.index("-t") + 1] == test_ebuild.DOCKER_TAG
     assert docker_run[:5] == ["docker", "run", "--rm", "--platform", "linux/amd64"]
     script = test_ebuild.TOOLS_ROOT / "docker/run-ebuild"
-    assert docker_run[5:11] == [
+    assert docker_run[5:13] == [
         "--mount",
-        f"type=bind,src={root},dst=/var/db/repos/turbo-overlay,readonly",
+        f"type=bind,src={root},dst=/mnt/overlay-source,readonly",
         "--mount",
         f"type=bind,src={script},dst=/usr/local/bin/run-ebuild,readonly",
+        "--env",
+        "OVERLAY_SOURCE=/mnt/overlay-source",
         "--env",
         "OVERLAY_REPO=/var/db/repos/turbo-overlay",
     ]
@@ -304,6 +306,47 @@ def test_run_ebuild_main_failures(
     result = run_ebuild_main(tmp_path, *args, **env)
     assert result.returncode == code
     assert message in result.stderr
+
+
+def test_run_ebuild_copies_private_overlay_readable(tmp_path: Path) -> None:
+    # A checkout made under umask 077 is unreadable to Portage's unprivileged
+    # user, so run-ebuild must test a world-readable copy, not the mount.
+    (tmp_path / "source").mkdir()
+    source = overlay(tmp_path / "source")
+    (source / ".git").write_text("gitdir: /elsewhere\n")
+    (source / "tools/.venv/lib").mkdir(parents=True)
+    (source / "tools/.venv/lib/big").write_text("")
+    (source / "files").mkdir()
+    (source / "files/helper.sh").write_text("#!/bin/sh\n")
+    (source / "files/helper.sh").chmod(0o700)
+    for path in [source, *source.rglob("*")]:
+        if path.is_dir():
+            path.chmod(0o700)
+        elif path.name != "helper.sh":
+            path.chmod(0o600)
+    copy = tmp_path / "copy"
+
+    result = run_ebuild_main(tmp_path, EBUILD, OVERLAY_SOURCE=str(source), OVERLAY_REPO=str(copy))
+    assert result.returncode == 0, result.stderr
+    assert f"Testing {EBUILD} in {copy}" in result.stdout
+    assert (copy / EBUILD).read_text() == "EAPI=8\n"
+    assert not (copy / ".git").exists()
+    assert not (copy / "tools/.venv").exists()
+    for path in [copy, *copy.rglob("*")]:
+        executable = path.is_dir() or path.name == "helper.sh"
+        assert path.stat().st_mode & 0o777 == (0o755 if executable else 0o644), path
+    assert source.stat().st_mode & 0o777 == 0o700
+
+
+def test_run_ebuild_copy_failure_exits_2(tmp_path: Path) -> None:
+    result = run_ebuild_main(
+        tmp_path,
+        EBUILD,
+        OVERLAY_SOURCE=str(tmp_path / "missing"),
+        OVERLAY_REPO=str(tmp_path / "copy"),
+    )
+    assert result.returncode == 2
+    assert "Cannot copy overlay" in result.stderr
 
 
 def test_run_ebuild_main_requires_make_profile(tmp_path: Path) -> None:

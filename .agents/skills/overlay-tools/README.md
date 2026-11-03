@@ -95,7 +95,9 @@ stage3 and Portage snapshot (`--pull --no-cache`); subsequent runs reuse it,
 and fail with exit 2 if it has not been built. The image intentionally tracks
 `latest`, so results can shift between rebuilds. The checkout and
 `docker/run-ebuild` are mounted read-only on every run, so script changes apply
-without a rebuild. Build dependencies (`DEPEND`/`BDEPEND`, e.g. Go for
+without a rebuild. Portage tests a world-readable copy of the checkout made
+inside the container (without `.git` or `.venv`), so a checkout created under a
+restrictive umask such as 077 works without changing its permissions. Build dependencies (`DEPEND`/`BDEPEND`, e.g. Go for
 `go-module` ebuilds) are emerged from the Gentoo tree first. Portage fetches the distfile, validates the
 Manifest, and runs `unpack`, `prepare`, `configure`, `compile`, and `install` into
 a disposable container image directory. Repeat `--expect RELATIVE/PATH` to

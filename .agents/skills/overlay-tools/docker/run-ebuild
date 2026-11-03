@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The host mounts the checkout read-only. All Portage build/fetch state stays
-# inside this disposable container, not on the maintainer's Gentoo system.
+# The host mounts the checkout read-only at OVERLAY_SOURCE, and Portage reads
+# a copy at OVERLAY_REPO. All Portage build/fetch state stays inside this
+# disposable container, not on the maintainer's Gentoo system.
 
 usage="usage: run-ebuild category/package/package-version.ebuild [staged-path ...]"
 name_chars='[a-zA-Z0-9+_.-]+'
@@ -46,6 +47,19 @@ staged_path_exists() {
     done
     current=${image}/${path}
     [[ -e ${current} || -L ${current} ]]
+}
+
+# Portage reads the overlay partly as its unprivileged user, which cannot
+# enter a checkout made under umask 077 (0700 directories). Copy it into a
+# container-owned tree that everyone can read, leaving the host mount
+# untouched. Portage never reads VCS metadata or virtualenvs, so skip them.
+copy_overlay() {
+    local src=${1} dst=${2}
+    [[ -d ${src} ]] || return 1
+    mkdir -p "${dst}" || return
+    tar -C "${src}" --exclude=.git --exclude=.venv -cf - . \
+        | tar -C "${dst}" --no-same-owner -xf - || return
+    chmod -R u=rwX,go=rX "${dst}"
 }
 
 # PORTAGE_CONFIGROOT is honoured so tests can point Portage config at a temp dir.
@@ -97,6 +111,10 @@ main() {
     done
     image_dir_for "${path}" >/dev/null \
         || { echo "Ebuild filename does not match package: ${path}" >&2; exit 2; }
+    if [[ -n ${OVERLAY_SOURCE:-} ]]; then
+        copy_overlay "${OVERLAY_SOURCE}" "${repo}" \
+            || { echo "Cannot copy overlay from ${OVERLAY_SOURCE}" >&2; exit 2; }
+    fi
     [[ -f ${repo}/${path} ]] || { echo "Missing ebuild: ${path}" >&2; exit 2; }
     [[ -f ${repo}/profiles/repo_name ]] || { echo "Not a Gentoo overlay: ${repo}" >&2; exit 2; }
     read -r name < "${repo}/profiles/repo_name" || true
