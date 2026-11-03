@@ -308,6 +308,17 @@ def test_run_ebuild_main_failures(
     assert message in result.stderr
 
 
+def snapshot(root: Path) -> dict[str, tuple[int, bytes | None]]:
+    """Mode and file content of every entry under root, root included."""
+    return {
+        str(path.relative_to(root)): (
+            path.lstat().st_mode,
+            path.read_bytes() if path.is_file() else None,
+        )
+        for path in [root, *root.rglob("*")]
+    }
+
+
 def test_run_ebuild_copies_private_overlay_readable(tmp_path: Path) -> None:
     # A checkout made under umask 077 is unreadable to Portage's unprivileged
     # user, so run-ebuild must test a world-readable copy, not the mount.
@@ -324,6 +335,7 @@ def test_run_ebuild_copies_private_overlay_readable(tmp_path: Path) -> None:
             path.chmod(0o700)
         elif path.name != "helper.sh":
             path.chmod(0o600)
+    before = snapshot(source)
     copy = tmp_path / "copy"
 
     result = run_ebuild_main(tmp_path, EBUILD, OVERLAY_SOURCE=str(source), OVERLAY_REPO=str(copy))
@@ -335,7 +347,7 @@ def test_run_ebuild_copies_private_overlay_readable(tmp_path: Path) -> None:
     for path in [copy, *copy.rglob("*")]:
         executable = path.is_dir() or path.name == "helper.sh"
         assert path.stat().st_mode & 0o777 == (0o755 if executable else 0o644), path
-    assert source.stat().st_mode & 0o777 == 0o700
+    assert snapshot(source) == before
 
 
 def test_run_ebuild_copy_failure_exits_2(tmp_path: Path) -> None:
