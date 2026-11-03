@@ -17,6 +17,10 @@ from overlay_tools.core.subprocess_utils import require_tool, run
 EXIT_ENVIRONMENT = 2
 DOCKER_TAG = "turbo-overlay/ebuild-test:local"
 DOCKER_PLATFORM = ["--platform", "linux/amd64"]
+# The checkout is mounted read-only at CONTAINER_SOURCE; run-ebuild copies it
+# to CONTAINER_REPO so Portage's unprivileged user can read it whatever the
+# host permissions are.
+CONTAINER_SOURCE = "/mnt/overlay-source"
 CONTAINER_REPO = "/var/db/repos/turbo-overlay"
 CONTAINER_SCRIPT = "/usr/local/bin/run-ebuild"
 EBUILD_PATH = re.compile(r"^[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+\.ebuild$")
@@ -78,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         for path in args.expect:
             validate_staged_path(path)
         mounts = [
-            bind_mount(overlay, CONTAINER_REPO),
+            bind_mount(overlay, CONTAINER_SOURCE),
             bind_mount(TOOLS_ROOT / "docker/run-ebuild", CONTAINER_SCRIPT),
         ]
     except ValueError as exc:
@@ -113,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
         "--rm",
         *DOCKER_PLATFORM,
         *(arg for mount in mounts for arg in ("--mount", mount)),
+        "--env",
+        f"OVERLAY_SOURCE={CONTAINER_SOURCE}",
         "--env",
         f"OVERLAY_REPO={CONTAINER_REPO}",
         DOCKER_TAG,
