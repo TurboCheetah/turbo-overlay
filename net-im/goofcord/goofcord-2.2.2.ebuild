@@ -85,16 +85,14 @@ src_install() {
 		"${DESTDIR}/chrome_crashpad_handler"
 
 	# Payload files absent in some releases (2.2.2 lacks goofbind;
-	# 2.3.1+ adds goofcord-launcher).
-	if [[ -f "${DESTDIR}/resources/goofbind" ]]; then
-		fperms 0755 "${DESTDIR}/resources/goofbind"
-	fi
-	if [[ -f "${DESTDIR}/resources/patchcord" ]]; then
-		fperms 0755 "${DESTDIR}/resources/patchcord"
-	fi
-	if [[ -f "${DESTDIR}/goofcord-launcher" ]]; then
-		fperms 0755 "${DESTDIR}/goofcord-launcher"
-	fi
+	# 2.3.1+ adds goofcord-launcher). Check the install image, not the
+	# live system: doins installs them 0644.
+	local exe
+	for exe in resources/goofbind resources/patchcord goofcord-launcher; do
+		if [[ -f ${ED}${DESTDIR}/${exe} ]]; then
+			fperms 0755 "${DESTDIR}/${exe}"
+		fi
+	done
 
 	# Match GURU vesktop-bin / gentoo discord: setuid sandbox via 4711.
 	fowners root "${DESTDIR}/chrome-sandbox"
