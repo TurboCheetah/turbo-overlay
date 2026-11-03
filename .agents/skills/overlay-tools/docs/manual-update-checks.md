@@ -23,24 +23,3 @@ Package-specific procedures for packages that `check-updates` reports as
   the YAML contains the matching Linux `.deb` entry.
 - Pitfall: do not trust GitHub latest-release data for current Linux builds.
 
-## x11-terms/warp-bin
-
-- Why manual: the changelog gives the latest base version, but the downloadable
-  archive also needs the correct `stable_0N` suffix.
-- Sources of truth:
-  - `https://docs.warp.dev/changelog`
-  - `https://releases.warp.dev/stable/v<MY_PV>/warp-terminal-v<MY_PV>-1-x86_64.pkg.tar.zst`
-- Check procedure:
-  1. Read the newest version from the Warp changelog, such as
-     `0.2026.03.04.08.20`.
-  2. Probe archive URLs with `MY_PV` values in order:
-     `<version>.stable_01`, then `_02`, then `_03`, and so on.
-  3. Stop at the first archive URL that returns `200`.
-  4. Set Gentoo `PV` to `<version>_pNN`, where `NN` matches the stable suffix.
-- Version mapping:
-  - changelog version: `0.YYYY.MM.DD.HH.MM`
-  - archive version: `0.YYYY.MM.DD.HH.MM.stable_NN`
-  - Gentoo version: `0.YYYY.MM.DD.HH.MM_pNN`
-- Validation rule: do not bump until the exact archive URL exists.
-- Pitfall: the changelog version alone is not enough; the suffix must be
-  confirmed against the release archive.

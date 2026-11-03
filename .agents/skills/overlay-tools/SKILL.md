@@ -92,7 +92,7 @@ ebuilds and Manifests; do not automatically uninstall existing packages.
 .agents/skills/overlay-tools/bin/update-ebuild -y -v 1.2.3 media-video/hayase-bin
 
 # With MY_PV mapping
-.agents/skills/overlay-tools/bin/update-ebuild -y -v 0.2025.12.10.08.12_p03 -m "0.2025.12.10.08.12.stable_03" x11-terms/warp-bin
+.agents/skills/overlay-tools/bin/update-ebuild -y -v 1.2.3_p00 -m "1.2.3.stable_00" category/package
 
 # Dry run
 .agents/skills/overlay-tools/bin/update-ebuild -n -v 2.0.0 net-im/goofcord

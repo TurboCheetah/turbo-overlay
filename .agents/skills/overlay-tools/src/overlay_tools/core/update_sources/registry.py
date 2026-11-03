@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from overlay_tools.core.update_sources.base import PackageSourceContext, SourceMatch, UpdateSource
 from overlay_tools.core.update_sources.hayase import HayaseUpdateSource
-from overlay_tools.core.update_sources.warp import WarpUpdateSource
 
-DEFAULT_UPDATE_SOURCES: tuple[UpdateSource, ...] = (
-    HayaseUpdateSource(),
-    WarpUpdateSource(),
-)
+DEFAULT_UPDATE_SOURCES: tuple[UpdateSource, ...] = (HayaseUpdateSource(),)
 
 
 def find_source_match(

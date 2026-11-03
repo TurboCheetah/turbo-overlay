@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-m",
         "--my-pv",
         metavar="MY_PV",
-        help="Set MY_PV for upstream version mapping (e.g., for warp-bin)",
+        help="Set MY_PV when the upstream version string differs from PV",
     )
     parser.add_argument(
         "-n", "--dry-run", action="store_true", help="Preview changes without applying"
