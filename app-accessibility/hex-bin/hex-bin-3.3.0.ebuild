@@ -22,6 +22,8 @@ RESTRICT="bindist mirror strip test"
 # Linked: alsa-lib, vulkan-loader, libxkbcommon, openssl.
 # Loaded at runtime: the X11, xcb, Xcursor, Xi and Wayland client libraries.
 # curl downloads speech models.
+# Upstream builds on Ubuntu 24.04 and documents glibc 2.39 as the floor
+# (docs/linux.md); the binary references GLIBC_2.39 symbols.
 RDEPEND="
 	>=sys-libs/glibc-2.39
 	dev-libs/openssl:0/3
