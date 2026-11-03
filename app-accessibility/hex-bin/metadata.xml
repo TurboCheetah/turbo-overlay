@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Hex by Anomaly is local voice dictation. Hold a shortcut, speak, and
+		Hex transcribes on-device and pastes the text into the focused app.
+		The Linux build supports X11 and wlroots-based Wayland compositors,
+		uses ALSA for audio, and runs inference on Vulkan or the CPU.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">anomalyco/hex</remote-id>
+		<doc>https://github.com/anomalyco/hex/blob/main/docs/linux.md</doc>
+	</upstream>
+</pkgmetadata>
