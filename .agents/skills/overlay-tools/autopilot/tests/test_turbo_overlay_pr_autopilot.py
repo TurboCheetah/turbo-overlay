@@ -42,6 +42,30 @@ def clean_cubic_run(**changes):
     }
 
 
+def skipped_rabbit_check(**changes):
+    """CodeRabbit's rollup entry when it has no review seat for the PR."""
+    return {
+        "__typename": "CheckRun",
+        "name": "CodeRabbit",
+        "workflowName": "",
+        "status": "COMPLETED",
+        "conclusion": "SKIPPED",
+        **changes,
+    }
+
+
+def skipped_rabbit_run(**changes):
+    return {
+        "id": 2,
+        "name": "CodeRabbit",
+        "app": {"slug": "coderabbitai"},
+        "head_sha": SHA,
+        "status": "completed",
+        "conclusion": "skipped",
+        **changes,
+    }
+
+
 def fixture(
     *,
     author="TurboCheetah",
@@ -72,6 +96,8 @@ def fixture(
     rabbit_comment_updated=None,
     rabbit_coverage_login="coderabbitai[bot]",
     include_bot_reviews=True,
+    extra_checks=(),
+    extra_runs=(),
 ):
     calls = {"pulls": 0}
     if cubic_runs is None:
@@ -108,6 +134,7 @@ def fixture(
             "conclusion": "FAILURE" if failed_check else "SUCCESS",
         },
         {"__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS"},
+        *extra_checks,
     ]
     details = {
         "reviewDecision": review_decision,
@@ -181,7 +208,8 @@ def fixture(
         if args[0] == "pr":
             return details
         if args[0] == "api" and args[1].endswith("/check-runs"):
-            return [{"total_count": len(cubic_runs), "check_runs": cubic_runs}]
+            runs = [*cubic_runs, *extra_runs]
+            return [{"total_count": len(runs), "check_runs": runs}]
         if args[0] == "api" and args[1].endswith("/commits"):
             shas = pr_commits if pr_commits is not None else [OLD_SHA, SHA]
             return [[{"sha": sha} for sha in shas]]
@@ -240,6 +268,75 @@ class MergeGateTests(unittest.TestCase):
                 with patch.object(gate, "gh", side_effect=fixture(**changes)):
                     reasons, _ = gate.inspect(102, SHA, agent_reviewed=True)
                 self.assertTrue(any(expected in reason for reason in reasons), reasons)
+
+    def test_agent_review_accepts_coderabbit_skipped_check(self):
+        # CodeRabbit holds no review seat here, so its check run completes as
+        # "skipped" rather than succeeding. The agent review stands in for it.
+        changes = {"extra_checks": [skipped_rabbit_check()], "extra_runs": [skipped_rabbit_run()]}
+        with patch.object(gate, "gh", side_effect=fixture(**changes)):
+            self.assertEqual(gate.inspect(102, SHA, agent_reviewed=True)[0], [])
+        self.assertIn("check not successful: CodeRabbit", self.check(**changes))
+
+    def test_agent_review_blocks_other_skipped_or_unfinished_checks(self):
+        cases: tuple[tuple[str, dict[str, Any]], ...] = (
+            # A workflow job sharing CodeRabbit's name is not CodeRabbit.
+            (
+                "workflow job named CodeRabbit",
+                {
+                    "extra_checks": [skipped_rabbit_check()],
+                    "extra_runs": [skipped_rabbit_run(app={"slug": "github-actions"})],
+                },
+            ),
+            (
+                "CodeRabbit run plus a same-named workflow job",
+                {
+                    "extra_checks": [skipped_rabbit_check()],
+                    "extra_runs": [
+                        skipped_rabbit_run(),
+                        skipped_rabbit_run(id=3, app={"slug": "github-actions"}),
+                    ],
+                },
+            ),
+            ("no CodeRabbit run on the head", {"extra_checks": [skipped_rabbit_check()]}),
+            (
+                "CodeRabbit run on another commit",
+                {
+                    "extra_checks": [skipped_rabbit_check()],
+                    "extra_runs": [skipped_rabbit_run(head_sha=OLD_SHA)],
+                },
+            ),
+            (
+                "latest CodeRabbit run did not skip",
+                {
+                    "extra_checks": [skipped_rabbit_check()],
+                    "extra_runs": [
+                        skipped_rabbit_run(),
+                        skipped_rabbit_run(id=3, conclusion="failure"),
+                    ],
+                },
+            ),
+            (
+                "CodeRabbit still pending",
+                {
+                    "extra_checks": [skipped_rabbit_check(status="IN_PROGRESS", conclusion="")],
+                    "extra_runs": [skipped_rabbit_run(status="in_progress", conclusion=None)],
+                },
+            ),
+            (
+                "skipped CI workflow job",
+                {
+                    "extra_checks": [
+                        skipped_rabbit_check(name="CodeRabbit", workflowName="ci"),
+                    ],
+                    "extra_runs": [skipped_rabbit_run()],
+                },
+            ),
+        )
+        for label, changes in cases:
+            with self.subTest(label):
+                with patch.object(gate, "gh", side_effect=fixture(**changes)):
+                    reasons, _ = gate.inspect(102, SHA, agent_reviewed=True)
+                self.assertIn("check not successful: CodeRabbit", reasons)
 
     def test_agent_review_stale_head_blocks(self):
         with patch.object(gate, "gh", side_effect=fixture()):

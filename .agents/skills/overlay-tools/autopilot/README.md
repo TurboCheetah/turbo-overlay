@@ -30,6 +30,9 @@ outside Git; this PR does not change them.
    decline bot-authored PRs, so the agent review may not be gated on a seat.
    Bot reviews are additional evidence; their lack of a review seat or paid
    plan must not veto a sound agent review.
+   With the flag, CodeRabbit's check run may complete as `skipped` instead of
+   `success`, but only when every check run of that name on the head comes
+   from CodeRabbit's app; a same-named workflow job never qualifies.
    The gate still rejects unauthorized heads, changed commits, non-green checks,
    standing change requests, unresolved threads, and GitHub merge conflicts.
    Without `--agent-reviewed`, substantive current-head bot reviews are required.
