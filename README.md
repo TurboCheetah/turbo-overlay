@@ -9,6 +9,16 @@ $ emerge --sync turbo-overlay
 
 ## Migrations
 
+### Warp
+
+`x11-terms/warp` was removed on 2026-11-03. Its source ebuilds could not
+build: Portage builds Rust packages offline, and the ebuilds did not vendor
+Warp's crates. Upstream has also stopped tagging source releases on GitHub.
+Removing the package from the overlay does not uninstall an existing copy.
+Unmerge `x11-terms/warp` first, then install Warp from
+[upstream's Linux packages](https://www.warp.dev/download). Unmerging after
+the replacement is in place can remove files it installed at the same paths.
+
 ### T3 Code desktop and OpenRC
 
 `dev-util/t3code-bin` and `dev-util/t3code-nightly-bin` are deprecated and
