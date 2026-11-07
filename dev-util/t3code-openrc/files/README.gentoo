@@ -1,0 +1,50 @@
+T3 Code on OpenRC
+
+This package installs an OpenRC adapter, not T3 Code. Installing it does not
+download, initialize, enable, start or restart anything. Portage owns
+/etc/init.d/t3code, /etc/conf.d/t3code and /usr/libexec/t3code-openrc;
+upstream owns the T3 runtime and the service account owns its state and logs.
+
+Replacing an existing service: a custom /usr/local/libexec/t3code-service or
+other wrapper is left alone. Back up the service state and database, stop the
+old service yourself, never run two supervisors against one T3 home, and
+merge config-protect updates (dispatch-conf) deliberately. Protocol-2 Node
+runtimes and copied launchers are incompatible and need a separate, backed-up
+migration; "initialize" refuses any existing state.
+
+1. As the non-root service user, install the runtime. This needs
+   net-misc/curl. Read the script first, and never run "t3 service install"
+   on OpenRC (upstream's service manager integration expects systemd):
+
+     curl --fail --location --output ./t3-install.sh https://t3.codes/install.sh
+     less ./t3-install.sh
+     t3_home="$HOME/.t3"
+     T3CODE_CHANNEL=nightly T3CODE_HOME="$t3_home" sh ./t3-install.sh
+     "$HOME/.local/bin/t3" --version
+
+2. Initialize it with the exact installed SemVer in upstream's spelling: keep
+   any -nightly and build suffix, no leading "v", not the Gentoo _pre
+   spelling and not "nightly". Use the same t3_home as above:
+
+     T3CODE_HOME="$t3_home" /usr/libexec/t3code-openrc initialize VERSION
+     T3CODE_HOME="$t3_home" /usr/libexec/t3code-openrc check
+
+3. As administrator set t3code_user and t3code_home (the same absolute
+   t3_home path) in /etc/conf.d/t3code and merge any config-protect update.
+   Codex, Claude or OpenCode helpers must be installed for that account.
+   Then enable and start the service yourself:
+
+     rc-update add t3code default
+     rc-service t3code start
+
+4. Verify with the environment descriptor, not a guessed /health path. It
+   must show the installed version and capabilities.serverSelfUpdate ==
+   "boot-service" (set port to your t3code_port, default 3773):
+
+     port=3773
+     curl --fail --silent --noproxy '*' http://127.0.0.1:$port/.well-known/t3/environment | jq .
+
+Troubleshooting: a missing or incomplete runtime is a startup failure, never
+bootstrapped. The service log is userdata/logs/openrc.log under t3code_home.
+Optional Tailscale Serve (USE=tailscale) is documented next to its options in
+/etc/conf.d/t3code.

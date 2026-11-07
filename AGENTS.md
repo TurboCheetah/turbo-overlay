@@ -179,8 +179,7 @@ DEPEND="${RDEPEND}"
   live beside the package in `<category>/<package>/`. `AGENTS.md` carries
   conventions and at most a one-line pointer.
 - User-facing post-install information comes from `readme.gentoo` / elog, not
-  from a hand-written guide installed with `dodoc`. This applies to new
-  packages; `dev-util/t3code-openrc` predates it and keeps its installed guide.
+  from a hand-written guide installed with `dodoc`.
 
 ### Generated Files
 - `Manifest` and `metadata/md5-cache/` are generated output. Regenerate them

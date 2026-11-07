@@ -6,18 +6,27 @@
 # HOME is read from this account's passwd entry, not the administrator's shell.
 t3code_user=""
 t3code_home=""
+# A missing or incomplete runtime under t3code_home is a startup failure; the
+# service never bootstraps it. See /usr/share/doc/t3code-openrc-*/README.gentoo*.
 
 # The adapter always binds 127.0.0.1. No browser or working-directory bootstrap.
 t3code_port="3773"
 # The unprivileged helper prepends the user's ~/.local/bin and ~/.opencode/bin.
 t3code_helper_path="/usr/local/bin:/usr/bin:/bin"
 
-# Optional: requires the package's tailscale USE flag and a running tailscaled.
-# OpenRC alone owns this mapping. T3's internal Tailscale Serve stays disabled.
+# Optional Tailscale Serve: requires the package's tailscale USE flag and a
+# running, authenticated tailscaled. Check "tailscale serve status" first.
+# OpenRC alone owns this mapping: it creates it after start and removes only the
+# configured port on stop. T3's internal Tailscale Serve stays disabled.
 t3code_tailscale="false"
-# REQUIRED if enabled: a dedicated, otherwise unused HTTPS port and an explicit
-# target exactly matching http://127.0.0.1:<t3code_port>. No implied proxy target.
+# REQUIRED if enabled: a dedicated, otherwise unused HTTPS port (do not share it
+# with another service) and an explicit target exactly matching
+# http://127.0.0.1:<t3code_port>. No implied proxy target.
 t3code_tailscale_https_port=""
 t3code_tailscale_target=""
+# If a post-start check fails, stop the service before retrying and review any
+# mapping left behind. To change the port while running, stop with the old
+# configuration first. A mapping alone does not prove remote reachability: probe
+# the advertised HTTPS host and port and compare versions with the local check.
 # Readiness attempts, 1..60, with one second between attempts.
 t3code_proxy_retries="10"
