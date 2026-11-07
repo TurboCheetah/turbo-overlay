@@ -30,8 +30,10 @@ Install the runtime as the service user
 ---------------------------------------
 
 Pick an existing non-root account with an absolute home directory and log in
-as it. The upstream installer is a manual user action, never a package hook.
-Read the script before running it:
+as it. The steps below use curl (net-misc/curl), which this package only
+depends on with USE=tailscale; install it first if you lack it. The upstream
+installer is a manual user action, never a package hook. Read the script
+before running it:
 
   curl --fail --location --output ./t3-install.sh https://t3.codes/install.sh
   less ./t3-install.sh
@@ -105,7 +107,9 @@ Check the environment descriptor, not a guessed /health path (the web app
 answers HTTP 200 for unknown paths). It must show the installed version and
 capabilities.serverSelfUpdate == "boot-service":
 
-  curl --fail --silent http://127.0.0.1:3773/.well-known/t3/environment | jq .
+  port=3773   # your t3code_port
+  curl --fail --silent --noproxy '*' \
+    "http://127.0.0.1:${port}/.well-known/t3/environment" | jq .
 
 Inspect process ownership and the log above. With Tailscale, read back
 "tailscale serve status" and probe the advertised HTTPS host and port, then

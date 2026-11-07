@@ -7,8 +7,9 @@ Carried over from the guide this package used to install; not re-audited against
   are part of the package image.
 - Root never executes a user-owned T3 executable. The root preflight uses `su`
   to run only the fixed packaged helper as the service user.
-- The wrapper resolves `activeVersion` on every invocation and execs that
-  version's `t3 __service-launcher`. OpenRC supervises the launcher with
+- On each `run`, the wrapper re-resolves `activeVersion` and execs that
+  version's `t3 __service-launcher` (`check` and `initialize` only read or
+  write state). OpenRC supervises the launcher with
   bounded respawn; upstream handles self-update and rollback.
 - Logs: only after privilege drop does `run` create `userdata/logs` and append
   to `userdata/logs/openrc.log`. Root hooks never create logs, touch files or

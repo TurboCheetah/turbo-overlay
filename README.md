@@ -54,9 +54,9 @@ For an existing desktop installation:
    unmerge the old desktop package if you no longer need it. No migration,
    adapter install, or repository update automatically uninstalls it.
 
-For an OpenRC-hosted CLI runtime, read the
-`README.gentoo` that the package installs
-(`/usr/share/doc/t3code-openrc-*/README.gentoo*`) first:
+For an OpenRC-hosted CLI runtime, read the package's
+[`README.gentoo`](dev-util/t3code-openrc/files/README.gentoo) first (once
+installed, it is `/usr/share/doc/t3code-openrc-*/README.gentoo*`):
 
 1. Review the [upstream CLI installation instructions](https://github.com/pingdotgg/t3code/blob/main/docs/user/install.md#command-line)
    and [installer source](https://t3.codes/install.sh). Run a reviewed installer
