@@ -9,20 +9,8 @@ import time
 
 REPO = "TurboCheetah/turbo-overlay"
 ALLOWED = {"TurboCheetah", "overlay-bot[bot]"}
-BOTS = {"coderabbitai", "cubic-dev-ai"}
-# CodeRabbit wraps its rate-limit notice in an HTML marker comment. Match the
-# marker, not free text: its edited summary comment can quote code or old notes.
-RABBIT_RATE_LIMIT = re.compile(r"<!--[^>]*rate limit[^>]*coderabbit\.ai[^>]*-->", re.IGNORECASE)
+BOTS = {"cubic-dev-ai"}
 CUBIC_CLEAN = re.compile(r"\b0 issues found\b")
-# CodeRabbit publishes a substantive current-head review either as a review
-# submission (when a run produces actionable comments) or by editing its
-# persistent summary comment, which then embeds a final_review_risk_coverage
-# marker naming the exact commit it covered. Match the marker's JSON fields,
-# not free text.
-RABBIT_COVERED = re.compile(
-    r"final_review_risk_coverage:\{\"sourceCommitId\":\"([0-9a-f]{40})\","
-    r"\"coveredCommitId\":\"([0-9a-f]{40})\",\"kind\":\"reviewed\"\}"
-)
 
 
 def _visible_body(body):
@@ -85,65 +73,6 @@ def cubic_clean_followup(number, head, reviewed):
     return reviewed in {c["sha"] for c in commits}
 
 
-def coderabbit_skipped_check(head, name):
-    """Whether rollup check `name` is CodeRabbit's own run, skipped on `head`.
-
-    CodeRabbit holds no review seat in this repository, so its check run
-    completes as "skipped" instead of succeeding. The rollup does not say
-    which app produced a check and a workflow job can share the name, so
-    require every check run on the head with that name to come from
-    CodeRabbit's app, and the latest of them to have completed as skipped.
-    """
-    pages = gh("api", f"repos/{REPO}/commits/{head}/check-runs", "--paginate", "--slurp")
-    runs = [run for page in pages for run in page["check_runs"] if run.get("name") == name]
-    if not runs or any((run.get("app") or {}).get("slug") != "coderabbitai" for run in runs):
-        return False
-    run = max(runs, key=lambda r: r["id"])
-    return (
-        run.get("head_sha") == head
-        and run.get("status") == "completed"
-        and run.get("conclusion") == "skipped"
-    )
-
-
-def coderabbit_comment_coverage(number, head, comments, review):
-    """Accept CodeRabbit's edited summary comment as a current-head review.
-
-    CodeRabbit posts a review submission only when a run produces actionable
-    comments; a clean run only edits its persistent summary comment, which
-    then embeds a final_review_risk_coverage marker naming the exact commit
-    it covered. Accept the marker only on the bot's own comment updated after
-    the older submission, when it names the current head with kind
-    "reviewed", and when the older review covered an earlier commit of this
-    PR. A rate-limit marker in the same comment disqualifies it.
-    """
-    submitted_at = review.get("submitted_at") or ""
-    candidates = [
-        c
-        for c in comments
-        # Exact bot login: the marker only means something from CodeRabbit's app.
-        if (c.get("user") or {}).get("login") == "coderabbitai[bot]"
-        and (c.get("updated_at") or "") >= submitted_at
-        and not RABBIT_RATE_LIMIT.search(c.get("body") or "")
-        and RABBIT_COVERED.search(c.get("body") or "")
-    ]
-    if not candidates:
-        return False
-    # The summary comment carrying the marker is edited in place; later bot
-    # replies ("Full review finished") can have newer updated_at without the
-    # marker, so pick the newest comment that actually embeds the marker.
-    comment = max(candidates, key=lambda c: c.get("updated_at") or "")
-    m = RABBIT_COVERED.search(comment.get("body") or "")
-    assert m is not None  # candidates are pre-filtered to marker-bearing comments
-    source, target = m.groups()
-    if source != head or target != head:
-        return False
-    commits = flatten_pages(
-        gh("api", f"repos/{REPO}/pulls/{number}/commits", "--paginate", "--slurp")
-    )
-    return review.get("commit_id") in {c["sha"] for c in commits}
-
-
 def inspect(number, expected_head, *, agent_reviewed=False):
     pr = gh("api", f"repos/{REPO}/pulls/{number}")
     reasons = []
@@ -183,17 +112,6 @@ def inspect(number, expected_head, *, agent_reviewed=False):
             good = c.get("state") == "SUCCESS"
         else:
             good = c.get("status") == "COMPLETED" and c.get("conclusion") == "SUCCESS"
-            # The agent's review stands in for CodeRabbit's unavailable one, so
-            # only then may CodeRabbit's skipped (never failed or pending) app
-            # check pass; workflow jobs always carry a workflowName.
-            if (
-                not good
-                and agent_reviewed
-                and c.get("status") == "COMPLETED"
-                and c.get("conclusion") == "SKIPPED"
-                and not c.get("workflowName")
-            ):
-                good = coderabbit_skipped_check(head, name)
         if not good:
             reasons.append(f"check not successful: {name}")
     if details.get("reviewDecision") in {"CHANGES_REQUESTED", "REVIEW_REQUIRED"}:
@@ -209,12 +127,9 @@ def inspect(number, expected_head, *, agent_reviewed=False):
         user = login.lower().removesuffix("[bot]")
         # A thread reply is stored as a COMMENTED review with an empty body, so
         # it must not displace the bot's real review. Other marker-only reviews
-        # are not substantive either (a bot with nothing else stays blocked),
-        # but a rate-limit marker is kept so it is reported as such.
+        # are not substantive either (a bot with nothing else stays blocked).
         body = review.get("body") or ""
-        if user in BOTS and (
-            review["state"] != "COMMENTED" or _visible_body(body) or RABBIT_RATE_LIMIT.search(body)
-        ):
+        if user in BOTS and (review["state"] != "COMMENTED" or _visible_body(body)):
             latest[user] = review
         # GitHub keeps a request for changes in force across later commits until
         # the reviewer approves or it is dismissed; comments do not clear it.
@@ -224,46 +139,20 @@ def inspect(number, expected_head, *, agent_reviewed=False):
         if state == "CHANGES_REQUESTED":
             reasons.append(f"changes requested by {login} and not approved or dismissed")
 
-    comments = flatten_pages(
-        gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--slurp")
-    )
     # The agent's own review can replace bot reviews that are unavailable for
-    # any authorized same-repo PR (CodeRabbit holds no seat in this small
-    # repository; Cubic may decline bot-authored PRs). All GitHub, CI,
+    # any authorized same-repo PR (Cubic may decline bot-authored PRs). All GitHub, CI,
     # authorization and thread gates remain.
     for bot in sorted(BOTS) if not agent_reviewed else ():
         review = latest.get(bot)
-        if not review or review["state"] not in {"APPROVED", "COMMENTED"}:
-            reasons.append(f"{bot} has not completed a substantive current-head review")
-        elif RABBIT_RATE_LIMIT.search(review.get("body") or ""):
-            # CodeRabbit embeds its rate-limit notice in an HTML marker comment.
-            # Match only that marker: a review body explaining or quoting the
-            # rate-limit check must not be mistaken for a rate-limited review.
-            reasons.append(f"{bot} review was rate-limited")
-        elif (
-            review["commit_id"] != head
-            and not (
-                bot == "cubic-dev-ai" and cubic_clean_followup(number, head, review["commit_id"])
-            )
-            and not (
-                bot == "coderabbitai"
-                and coderabbit_comment_coverage(number, head, comments, review)
-            )
-        ):
-            reasons.append(f"{bot} has not completed a substantive current-head review")
-
-    rabbit = latest.get("coderabbitai")
-    for comment in comments:
-        user = ((comment.get("user") or {}).get("login") or "").lower().removesuffix("[bot]")
         if (
-            not agent_reviewed
-            and user == "coderabbitai"
-            and rabbit
-            and comment["updated_at"] >= rabbit["submitted_at"]
-            and RABBIT_RATE_LIMIT.search(comment.get("body") or "")
+            not review
+            or review["state"] not in {"APPROVED", "COMMENTED"}
+            or (
+                review["commit_id"] != head
+                and not cubic_clean_followup(number, head, review["commit_id"])
+            )
         ):
-            reasons.append("CodeRabbit posted a rate-limit notice after its latest review")
-            break
+            reasons.append(f"{bot} has not completed a substantive current-head review")
 
     threads = gh(
         "api",

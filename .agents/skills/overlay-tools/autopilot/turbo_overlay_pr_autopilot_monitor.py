@@ -16,7 +16,7 @@ CONFIG = Path(
         str(Path.home() / ".hermes/data/turbo_overlay_pr_autopilot.json"),
     )
 )
-BOT_LOGINS = {"coderabbitai", "coderabbitai[bot]", "cubic-dev-ai", "cubic-dev-ai[bot]"}
+BOT_LOGINS = {"cubic-dev-ai", "cubic-dev-ai[bot]"}
 # GitHub pages review threads at 100; this bounds a pathological PR (20k threads).
 MAX_THREAD_PAGES = 200
 # A thread can also exceed 100 comments; bound the per-thread comment
@@ -137,18 +137,11 @@ def fetch_thread_comments(thread, deadline=None):
 def fetch_threads(number, deadline=None):
     """Fetch every review-thread node for a PR, bounded by a safety cap.
 
-    CodeRabbit flagged that a first-page-only query made threads_digest and
-    unresolved_threads miss changes beyond the first 100 threads, so the
-    unchanged-output check skipped reconciliation for oversized PRs. GitHub
-    pages at 100; stop early when a page has no more, and flag truncation
-    only if the cap is hit (the merge gate still refuses unenumerated
-    threads independently). Cubic flagged that the digest also missed
-    replies or edits inside an existing thread, so each thread includes a
-    digest of its comments (bounded at 100; the hasNextPage marker is part
-    of the digest so an oversized thread still changes it). CodeRabbit
-    then flagged that only the first comments page was fetched: a later
-    page edit went unnoticed, so each thread's comments are paginated in
-    full (still cap-bounded).
+    GitHub pages at 100; stop early when a page has no more, and flag
+    truncation only if the cap is hit (the merge gate still refuses
+    unenumerated threads independently). Fetch each thread's comments in
+    full too (still cap-bounded), so replies or edits on later comment pages
+    change the digest and trigger reconciliation.
     """
     nodes = []
     cursor = None

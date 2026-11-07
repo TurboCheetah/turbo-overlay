@@ -5,6 +5,9 @@ This directory holds the **non-secret code** for the PR-open automation on
 The deployed webhook subscription, cron job, GitHub hook, and HMAC secret live
 outside Git; this PR does not change them.
 
+Autopilot remains paused. The flow below describes its behavior when explicitly
+enabled; updating these sources does not enable or redeploy the automation.
+
 ## Flow
 
 1. A signed GitHub `pull_request` webhook reaches a second route. The filter
@@ -26,24 +29,16 @@ outside Git; this PR does not change them.
    the evidence, then call `turbo_overlay_pr_autopilot_gate.py` with the full
    reviewed head SHA and `--agent-reviewed`. This applies to every authorized
    same-repo PR, human-authored `TurboCheetah` and `overlay-bot[bot]` alike:
-   CodeRabbit holds no review seat in this small repository and Cubic may
-   decline bot-authored PRs, so the agent review may not be gated on a seat.
+   Cubic may decline a review, so the agent review may not be gated on a seat.
    Bot reviews are additional evidence; their lack of a review seat or paid
    plan must not veto a sound agent review.
-   With the flag, CodeRabbit's check run may complete as `skipped` instead of
-   `success`, but only when every check run of that name on the head comes
-   from CodeRabbit's app; a same-named workflow job never qualifies.
+   The flag never exempts a failed, pending, or skipped check.
    The gate still rejects unauthorized heads, changed commits, non-green checks,
    standing change requests, unresolved threads, and GitHub merge conflicts.
-   Without `--agent-reviewed`, substantive current-head bot reviews are required.
+   Without `--agent-reviewed`, a substantive current-head Cubic review is required.
    Cubic posts no review for a clean follow-up commit, so its successful
    check run on the exact head counts when it reports "0 issues found" and
-   its last review covered an earlier commit of the PR. CodeRabbit likewise
-   only posts a review submission when a run produces actionable comments;
-   for a clean run it edits its persistent summary comment, which embeds a
-   `final_review_risk_coverage` marker for the exact head, and that marker
-   counts when it names the current head, the comment was updated after the
-   older review, and that review covered an earlier commit of the PR. Empty
+   its last review covered an earlier commit of the PR. Empty
    bot thread-reply reviews are ignored. The `--merge` mode rechecks every gate,
    then uses
    `gh pr merge --squash --match-head-commit` without an admin override and
@@ -87,6 +82,8 @@ before reporting success. A PR for this workflow cannot prove App posting until
 the workflow is merged onto the default branch.
 
 ## Deployment
+
+Do not deploy or resume the paused automation without explicit authorization.
 
 The scripts require Python 3.11+ and an authenticated `gh` CLI. To update the
 existing default-profile installation after this change reaches the main

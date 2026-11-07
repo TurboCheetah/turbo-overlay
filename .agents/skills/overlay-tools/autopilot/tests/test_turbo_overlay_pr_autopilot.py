@@ -42,30 +42,6 @@ def clean_cubic_run(**changes):
     }
 
 
-def skipped_rabbit_check(**changes):
-    """CodeRabbit's rollup entry when it has no review seat for the PR."""
-    return {
-        "__typename": "CheckRun",
-        "name": "CodeRabbit",
-        "workflowName": "",
-        "status": "COMPLETED",
-        "conclusion": "SKIPPED",
-        **changes,
-    }
-
-
-def skipped_rabbit_run(**changes):
-    return {
-        "id": 2,
-        "name": "CodeRabbit",
-        "app": {"slug": "coderabbitai"},
-        "head_sha": SHA,
-        "status": "completed",
-        "conclusion": "skipped",
-        **changes,
-    }
-
-
 def fixture(
     *,
     author="TurboCheetah",
@@ -75,7 +51,6 @@ def fixture(
     review_head=SHA,
     failed_check=False,
     unresolved=False,
-    rabbit_comment=None,
     human_reviews=(),
     draft=False,
     state="open",
@@ -88,13 +63,9 @@ def fixture(
     draft_after_polls=None,
     state_after_polls=None,
     review_bodies=None,
-    cubic_review_head=None,
     cubic_runs=None,
     pr_commits=None,
     trailing_reviews=(),
-    rabbit_coverage=None,
-    rabbit_comment_updated=None,
-    rabbit_coverage_login="coderabbitai[bot]",
     include_bot_reviews=True,
     extra_checks=(),
     extra_runs=(),
@@ -133,7 +104,7 @@ def fixture(
             "status": "COMPLETED",
             "conclusion": "FAILURE" if failed_check else "SUCCESS",
         },
-        {"__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS"},
+        {"__typename": "StatusContext", "context": "Cubic", "state": "SUCCESS"},
         *extra_checks,
     ]
     details = {
@@ -142,17 +113,12 @@ def fixture(
     }
     reviews = [
         {
-            "user": {"login": name},
-            "commit_id": (
-                cubic_review_head
-                if name == "cubic-dev-ai[bot]" and cubic_review_head
-                else review_head
-            ),
+            "user": {"login": "cubic-dev-ai[bot]"},
+            "commit_id": review_head,
             "state": "COMMENTED",
-            "body": (review_bodies or {}).get(name, "Reviewed"),
+            "body": (review_bodies or {}).get("cubic-dev-ai[bot]", "Reviewed"),
             "submitted_at": "2026-09-28T17:00:00Z",
         }
-        for name in ("coderabbitai[bot]", "cubic-dev-ai[bot]")
     ]
     reviews = (
         [
@@ -162,35 +128,6 @@ def fixture(
         + (reviews if include_bot_reviews else [])
         + list(trailing_reviews)
     )
-    comments = [
-        entry
-        for entry in [
-            (
-                {
-                    "user": {"login": "coderabbitai[bot]"},
-                    "body": rabbit_comment,
-                    "updated_at": rabbit_comment_updated or "2026-09-28T17:02:00Z",
-                }
-                if rabbit_comment is not None
-                else None
-            ),
-            (
-                {
-                    "user": {"login": rabbit_coverage_login},
-                    "body": (
-                        "<!-- final_review_risk_coverage:"
-                        '{"sourceCommitId":"' + rabbit_coverage + '",'
-                        '"coveredCommitId":"' + rabbit_coverage + '",'
-                        '"kind":"reviewed"} -->'
-                    ),
-                    "updated_at": rabbit_comment_updated or "2026-09-28T17:02:00Z",
-                }
-                if rabbit_coverage is not None
-                else None
-            ),
-        ]
-        if entry is not None
-    ]
     threads = {
         "data": {
             "repository": {
@@ -217,8 +154,6 @@ def fixture(
             return threads
         if args[0] == "api" and "reviews" in args[1]:
             return reviews
-        if args[0] == "api" and "comments" in args[1]:
-            return comments
         if args[0] == "api" and "pulls/" in args[1]:
             return pr_at_call()
         raise AssertionError(args)
@@ -234,6 +169,16 @@ class MergeGateTests(unittest.TestCase):
     def test_green_authorized_head(self):
         self.assertEqual(self.check(), [])
 
+    def test_cubic_review_is_sufficient_without_other_bot_activity(self):
+        review = {
+            "user": {"login": "cubic-dev-ai[bot]"},
+            "commit_id": SHA,
+            "state": "COMMENTED",
+            "body": "Reviewed the current head.",
+            "submitted_at": "2026-09-28T17:00:00Z",
+        }
+        self.assertEqual(self.check(include_bot_reviews=False, trailing_reviews=[review]), [])
+
     def test_agent_review_replaces_unavailable_bot_reviews(self):
         with patch.object(
             gate, "gh", side_effect=fixture(author="overlay-bot[bot]", include_bot_reviews=False)
@@ -243,10 +188,9 @@ class MergeGateTests(unittest.TestCase):
         self.assertTrue(any("current-head review" in reason for reason in reasons))
 
     def test_agent_review_replaces_unavailable_bot_reviews_for_human_pr(self):
-        # CodeRabbit holds no review seat in this small repository regardless of
-        # author, and Cubic may refuse bot-authored PRs, so the agent review
-        # must also substitute for a human-authored authorized PR when bot
-        # reviews are unavailable. Without the flag the gate still blocks.
+        # Independent review may substitute for unavailable Cubic feedback on
+        # any authorized same-repository PR, not just bot-authored ones.
+        # Without the flag the gate still blocks.
         with patch.object(
             gate, "gh", side_effect=fixture(author="TurboCheetah", include_bot_reviews=False)
         ):
@@ -269,74 +213,64 @@ class MergeGateTests(unittest.TestCase):
                     reasons, _ = gate.inspect(102, SHA, agent_reviewed=True)
                 self.assertTrue(any(expected in reason for reason in reasons), reasons)
 
-    def test_agent_review_accepts_coderabbit_skipped_check(self):
-        # CodeRabbit holds no review seat here, so its check run completes as
-        # "skipped" rather than succeeding. The agent review stands in for it.
-        changes = {"extra_checks": [skipped_rabbit_check()], "extra_runs": [skipped_rabbit_run()]}
+    def test_agent_review_cannot_exempt_retired_bot_skipped_check(self):
+        # A leftover retired-app check is ordinary CI, not a review-seat exception.
+        changes = {
+            "extra_checks": [
+                {
+                    "__typename": "CheckRun",
+                    "name": "CodeRabbit",
+                    "workflowName": "",
+                    "status": "COMPLETED",
+                    "conclusion": "SKIPPED",
+                }
+            ],
+            "extra_runs": [
+                {
+                    "id": 2,
+                    "name": "CodeRabbit",
+                    "app": {"slug": "coderabbitai"},
+                    "head_sha": SHA,
+                    "status": "completed",
+                    "conclusion": "skipped",
+                }
+            ],
+        }
         with patch.object(gate, "gh", side_effect=fixture(**changes)):
-            self.assertEqual(gate.inspect(102, SHA, agent_reviewed=True)[0], [])
-        self.assertIn("check not successful: CodeRabbit", self.check(**changes))
+            reasons, _ = gate.inspect(102, SHA, agent_reviewed=True)
+        self.assertIn("check not successful: CodeRabbit", reasons)
 
-    def test_agent_review_blocks_other_skipped_or_unfinished_checks(self):
-        cases: tuple[tuple[str, dict[str, Any]], ...] = (
-            # A workflow job sharing CodeRabbit's name is not CodeRabbit.
-            (
-                "workflow job named CodeRabbit",
-                {
-                    "extra_checks": [skipped_rabbit_check()],
-                    "extra_runs": [skipped_rabbit_run(app={"slug": "github-actions"})],
-                },
-            ),
-            (
-                "CodeRabbit run plus a same-named workflow job",
-                {
-                    "extra_checks": [skipped_rabbit_check()],
-                    "extra_runs": [
-                        skipped_rabbit_run(),
-                        skipped_rabbit_run(id=3, app={"slug": "github-actions"}),
-                    ],
-                },
-            ),
-            ("no CodeRabbit run on the head", {"extra_checks": [skipped_rabbit_check()]}),
-            (
-                "CodeRabbit run on another commit",
-                {
-                    "extra_checks": [skipped_rabbit_check()],
-                    "extra_runs": [skipped_rabbit_run(head_sha=OLD_SHA)],
-                },
-            ),
-            (
-                "latest CodeRabbit run did not skip",
-                {
-                    "extra_checks": [skipped_rabbit_check()],
-                    "extra_runs": [
-                        skipped_rabbit_run(),
-                        skipped_rabbit_run(id=3, conclusion="failure"),
-                    ],
-                },
-            ),
-            (
-                "CodeRabbit still pending",
-                {
-                    "extra_checks": [skipped_rabbit_check(status="IN_PROGRESS", conclusion="")],
-                    "extra_runs": [skipped_rabbit_run(status="in_progress", conclusion=None)],
-                },
-            ),
-            (
-                "skipped CI workflow job",
-                {
-                    "extra_checks": [
-                        skipped_rabbit_check(name="CodeRabbit", workflowName="ci"),
-                    ],
-                    "extra_runs": [skipped_rabbit_run()],
-                },
-            ),
-        )
-        for label, changes in cases:
-            with self.subTest(label):
-                with patch.object(gate, "gh", side_effect=fixture(**changes)):
-                    reasons, _ = gate.inspect(102, SHA, agent_reviewed=True)
-                self.assertIn("check not successful: CodeRabbit", reasons)
+    def test_non_successful_checks_block_with_or_without_agent_review(self):
+        for agent_reviewed in (False, True):
+            for workflow in ("", "ci"):
+                for status, conclusion in (
+                    ("COMPLETED", "SKIPPED"),
+                    ("COMPLETED", "FAILURE"),
+                    ("IN_PROGRESS", ""),
+                    ("QUEUED", ""),
+                ):
+                    with self.subTest(
+                        agent_reviewed=agent_reviewed,
+                        workflow=workflow,
+                        status=status,
+                        conclusion=conclusion,
+                    ):
+                        check = {
+                            "__typename": "CheckRun",
+                            "name": "extra check",
+                            "workflowName": workflow,
+                            "status": status,
+                            "conclusion": conclusion,
+                        }
+                        with patch.object(gate, "gh", side_effect=fixture(extra_checks=[check])):
+                            reasons, _ = gate.inspect(102, SHA, agent_reviewed=agent_reviewed)
+                        self.assertIn("check not successful: extra check", reasons)
+            for state in ("FAILURE", "ERROR", "PENDING"):
+                with self.subTest(agent_reviewed=agent_reviewed, state=state):
+                    check = {"__typename": "StatusContext", "context": "external", "state": state}
+                    with patch.object(gate, "gh", side_effect=fixture(extra_checks=[check])):
+                        reasons, _ = gate.inspect(102, SHA, agent_reviewed=agent_reviewed)
+                    self.assertIn("check not successful: external", reasons)
 
     def test_agent_review_stale_head_blocks(self):
         with patch.object(gate, "gh", side_effect=fixture()):
@@ -344,12 +278,12 @@ class MergeGateTests(unittest.TestCase):
         self.assertTrue(any("head changed" in reason for reason in reasons))
 
     def test_clean_cubic_check_covers_followup_commit(self):
-        self.assertEqual(self.check(cubic_review_head=OLD_SHA), [])
+        self.assertEqual(self.check(review_head=OLD_SHA), [])
 
     def test_cubic_check_with_issues_does_not_cover_followup(self):
         summary = {"summary": "AI review completed with 1 review. 1 issue found across 2 files."}
         runs = [clean_cubic_run(output=summary)]
-        reasons = self.check(cubic_review_head=OLD_SHA, cubic_runs=runs)
+        reasons = self.check(review_head=OLD_SHA, cubic_runs=runs)
         self.assertIn("cubic-dev-ai has not completed a substantive current-head review", reasons)
 
     def test_cubic_fallback_rejects_bad_runs(self):
@@ -366,64 +300,12 @@ class MergeGateTests(unittest.TestCase):
             ],
         }
         for label, runs in cases.items():
-            reasons = self.check(cubic_review_head=OLD_SHA, cubic_runs=runs)
+            reasons = self.check(review_head=OLD_SHA, cubic_runs=runs)
             self.assertTrue(any("cubic-dev-ai" in r for r in reasons), label)
 
     def test_cubic_fallback_requires_review_of_this_pr(self):
-        reasons = self.check(cubic_review_head=OLD_SHA, pr_commits=[SHA])
+        reasons = self.check(review_head=OLD_SHA, pr_commits=[SHA])
         self.assertTrue(any("cubic-dev-ai" in r for r in reasons))
-
-    def test_clean_check_does_not_cover_stale_coderabbit_review(self):
-        reasons = self.check(review_head=OLD_SHA)
-        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
-
-    def test_rabbit_summary_coverage_covers_followup_commit(self):
-        # CodeRabbit posts no new review submission for a clean follow-up commit;
-        # its edited summary comment carries the coverage marker for the head.
-        reasons = self.check(review_head=OLD_SHA, rabbit_coverage=SHA)
-        self.assertEqual(reasons, [])
-
-    def test_rabbit_summary_coverage_requires_current_head(self):
-        # A coverage marker naming an older commit must not pass for the head.
-        reasons = self.check(review_head=OLD_SHA, rabbit_coverage=OLD_SHA)
-        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
-
-    def test_rabbit_summary_coverage_comment_before_review_blocks(self):
-        # A marker edited before the submitted review is stale, not current-head
-        # coverage; the freshness gate compares against the review submission.
-        reasons = self.check(
-            review_head=OLD_SHA,
-            rabbit_coverage=SHA,
-            rabbit_comment_updated="2026-09-28T16:00:00Z",
-        )
-        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
-
-    def test_rabbit_summary_coverage_requires_pr_membership(self):
-        # The older review must have covered a commit of this PR; a review of
-        # some other commit cannot be extended to the current head.
-        reasons = self.check(review_head="b" * 40, rabbit_coverage=SHA)
-        self.assertIn("coderabbitai has not completed a substantive current-head review", reasons)
-
-    def test_rabbit_summary_coverage_requires_exact_bot_login(self):
-        # A user account whose login matches the bot minus "[bot]" is not the app.
-        for login in ("coderabbitai", "CodeRabbitAI[bot]", "someone"):
-            reasons = self.check(
-                review_head=OLD_SHA, rabbit_coverage=SHA, rabbit_coverage_login=login
-            )
-            self.assertIn(
-                "coderabbitai has not completed a substantive current-head review", reasons, login
-            )
-
-    def test_rabbit_summary_coverage_rate_limited_comment_blocks(self):
-        # A rate-limited summary edit must not count as current-head coverage.
-        body = (
-            "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n"
-            "<!-- final_review_risk_coverage:"
-            '{"sourceCommitId":"' + SHA + '","coveredCommitId":"' + SHA + '",'
-            '"kind":"reviewed"} -->'
-        )
-        reasons = self.check(review_head=OLD_SHA, rabbit_comment=body)
-        self.assertTrue(any("rate-limit" in r or "coderabbitai" in r for r in reasons))
 
     def test_green_path_returns_freshest_head(self):
         # The merge path passes inspect's head to --match-head-commit and
@@ -462,34 +344,10 @@ class MergeGateTests(unittest.TestCase):
     def test_unresolved_thread_blocks(self):
         self.assertTrue(any("unresolved" in r for r in self.check(unresolved=True)))
 
-    def test_rate_limit_marker_after_review_blocks(self):
-        body = "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->"
-        self.assertTrue(any("rate-limit" in r for r in self.check(rabbit_comment=body)))
-
-    def test_stale_skip_block_does_not_block_current_head_review(self):
-        # The edited summary comment keeps its skip block after a manual full review.
-        body = (
-            "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->\n"
-            "Review skipped. This code discusses a rate limit and skip review.\n"
-            "<!-- end of auto-generated comment: skip review by coderabbit.ai -->"
-        )
-        self.assertEqual(self.check(rabbit_comment=body), [])
-
-    def test_review_body_mentioning_rate_limit_does_not_block(self):
-        # A review body that explains the rate-limit check must not be mistaken
-        # for a rate-limited review: only the CodeRabbit marker comment counts.
-        bodies = {"coderabbitai[bot]": "Reviewed. This PR changes the rate limit check."}
-        self.assertEqual(self.check(review_bodies=bodies), [])
-
-    def test_review_body_marker_blocks(self):
-        body = "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->"
-        reasons = self.check(review_bodies={"coderabbitai[bot]": body})
-        self.assertTrue(any("rate-limit" in r for r in reasons))
-
     def test_bot_thread_reply_does_not_displace_real_review(self):
         # GitHub stores a thread reply as a COMMENTED review with an empty body.
         reply = {
-            "user": {"login": "coderabbitai[bot]"},
+            "user": {"login": "cubic-dev-ai[bot]"},
             "commit_id": SHA,
             "state": "COMMENTED",
             "body": "",
@@ -500,19 +358,19 @@ class MergeGateTests(unittest.TestCase):
     def test_empty_comment_review_blocks(self):
         # A COMMENTED review with no visible content is not a substantive
         # current-head review even when it is anchored at the head SHA.
-        reasons = self.check(review_bodies={"coderabbitai[bot]": "", "cubic-dev-ai[bot]": ""})
+        reasons = self.check(review_bodies={"cubic-dev-ai[bot]": ""})
         self.assertTrue(any("current-head review" in r for r in reasons))
 
     def test_marker_only_comment_review_blocks(self):
         # HTML marker comments alone do not make a review substantive.
         body = "<!-- cubic:review-post:abc -->"
-        reasons = self.check(review_bodies={"coderabbitai[bot]": body})
+        reasons = self.check(review_bodies={"cubic-dev-ai[bot]": body})
         self.assertTrue(any("current-head review" in r for r in reasons))
 
     def test_marker_plus_text_review_passes(self):
         # Marker comments with real findings text remain substantive.
         body = "<!-- cubic:review-post:abc -->\n**1 issue found**"
-        self.assertEqual(self.check(review_bodies={"coderabbitai[bot]": body}), [])
+        self.assertEqual(self.check(review_bodies={"cubic-dev-ai[bot]": body}), [])
 
     def test_stale_human_changes_request_blocks(self):
         reviews = [({"login": "TurboCheetah"}, "b" * 40, "CHANGES_REQUESTED")]
@@ -704,7 +562,7 @@ class MergeGateTests(unittest.TestCase):
                 "inspect",
                 side_effect=[
                     ([], SHA),
-                    (["coderabbitai has not completed a substantive current-head review"], SHA),
+                    (["cubic-dev-ai has not completed a substantive current-head review"], SHA),
                 ],
             ),
             patch.object(gate.subprocess, "run") as command,
@@ -802,6 +660,75 @@ class WebhookFilterTests(unittest.TestCase):
 
 
 class MonitorTests(unittest.TestCase):
+    def test_snapshot_tracks_cubic_feedback_but_ignores_retired_bot_feedback(self):
+        class Config:
+            def read_text(self):
+                return '{"created_after_pr":101}'
+
+        feedback = {"cubic": "Cubic findings", "retired": "old findings"}
+
+        def fake_gh(*args, **_):
+            logins = ("cubic-dev-ai", "cubic-dev-ai[bot]", "coderabbitai", "coderabbitai[bot]")
+            bodies = [
+                feedback["cubic"],
+                feedback["cubic"],
+                feedback["retired"],
+                feedback["retired"],
+            ]
+            if args[0] == "pr":
+                return [
+                    {
+                        "number": 102,
+                        "headRefOid": SHA,
+                        "baseRefName": "master",
+                        "isDraft": False,
+                        "statusCheckRollup": [],
+                        "latestReviews": [
+                            {
+                                "author": {"login": login},
+                                "state": "COMMENTED",
+                                "submittedAt": "2026-09-28T17:00:00Z",
+                                "body": body,
+                            }
+                            for login, body in zip(logins, bodies, strict=True)
+                        ],
+                    }
+                ]
+            if args[1].endswith("/comments"):
+                return [
+                    [{"user": {"login": login}, "body": body}]
+                    for login, body in zip(logins, bodies, strict=True)
+                ]
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [],
+                                "pageInfo": {"hasNextPage": False},
+                            }
+                        }
+                    }
+                }
+            }
+
+        with (
+            patch.object(monitor, "CONFIG", Config()),
+            patch.object(monitor, "gh", side_effect=fake_gh),
+        ):
+            first = monitor.snapshot()
+            pr = first["prs"][0]
+            self.assertEqual(
+                [r["bot"] for r in pr["bot_reviews"]], ["cubic-dev-ai", "cubic-dev-ai[bot]"]
+            )
+            self.assertEqual(
+                [c["bot"] for c in pr["bot_comments"]], ["cubic-dev-ai", "cubic-dev-ai[bot]"]
+            )
+            feedback["retired"] = "edited old findings"
+            self.assertEqual(first, monitor.snapshot())
+            feedback["cubic"] = "new Cubic findings"
+            self.assertNotEqual(first, monitor.snapshot())
+
     def test_new_pr_snapshot_is_stable_and_does_not_include_raw_bot_text(self):
         class Config:
             def read_text(self):
@@ -841,7 +768,7 @@ class MonitorTests(unittest.TestCase):
 
         rest_comments = [
             [
-                {"user": {"login": "coderabbitai[bot]"}, "body": "secret commented body"},
+                {"user": {"login": "cubic-dev-ai[bot]"}, "body": "secret commented body"},
                 {"user": {"login": "someone"}, "body": "human comment"},
             ]
         ]
@@ -1243,7 +1170,7 @@ class MonitorTests(unittest.TestCase):
         }
         human = [{"user": {"login": "someone"}, "body": "hi"}] * 100
         late_bot = {"user": {"login": "cubic-dev-ai[bot]"}, "body": "comment 101"}
-        early_bot = {"user": {"login": "coderabbitai[bot]"}, "body": "summary"}
+        early_bot = {"user": {"login": "cubic-dev-ai"}, "body": "summary"}
 
         def run(pages):
             def fake_gh(*args, **_):
