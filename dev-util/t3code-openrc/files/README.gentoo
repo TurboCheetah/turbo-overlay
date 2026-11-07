@@ -1,0 +1,114 @@
+T3 Code on OpenRC
+=================
+
+This package installs an OpenRC adapter, not T3 Code. Portage owns
+/etc/init.d/t3code, /etc/conf.d/t3code and /usr/libexec/t3code-openrc.
+Upstream owns the T3 executable, its runtime versions and updates. The
+service account owns its state, database and logs. Installing this package
+does not download, initialize, enable, start or restart anything.
+
+Before replacing an existing service
+------------------------------------
+
+A custom /usr/local/libexec/t3code-service or other local wrapper stays a
+separate file; this package neither deletes nor replaces it. Review the old
+init script and configuration, back up the service state and database, and
+plan an explicit service stop before changing a live deployment. Do not run
+two supervisors against the same T3 home.
+
+Portage config-protect may keep an existing /etc/init.d/t3code or
+/etc/conf.d/t3code and install a protected update next to it. Merge those
+changes deliberately (dispatch-conf or etc-update). Installing this package
+does not switch a custom service to this adapter, and nothing restarts.
+
+Protocol-2 Node runtimes and copied launchers are incompatible. Changing the
+protocol number does not migrate them: "initialize" refuses any existing
+state, even malformed JSON, directories and dangling symlinks. Existing
+deployments need a separate, backed-up migration of runtime and state.
+
+Install the runtime as the service user
+---------------------------------------
+
+Pick an existing non-root account with an absolute home directory and log in
+as it. The upstream installer is a manual user action, never a package hook.
+Read the script before running it:
+
+  curl --fail --location --output ./t3-install.sh https://t3.codes/install.sh
+  less ./t3-install.sh
+  t3_home="$HOME/.t3"   # choose the runtime home once and reuse it below
+  T3CODE_CHANNEL=nightly T3CODE_HOME="$t3_home" sh ./t3-install.sh
+  "$HOME/.local/bin/t3" --version
+
+Do not run "t3 service install" on OpenRC: upstream's service-manager
+integration expects systemd. The installer does not create OpenRC state.
+
+Copy the exact installed SemVer from the version output, in upstream's
+spelling (including any -nightly and build suffix, no leading "v"). Do not
+use the Gentoo _pre spelling or the dist-tag "nightly". Then initialize the
+downloaded runtime, with t3_home set to the same absolute path you will put
+in t3code_home:
+
+  version='REPLACE_WITH_EXACT_INSTALLED_SEMVER'
+  T3CODE_HOME="$t3_home" /usr/libexec/t3code-openrc initialize "$version"
+  T3CODE_HOME="$t3_home" /usr/libexec/t3code-openrc check
+
+"initialize" needs a non-root uid and writes private state only if none
+exists; "check" only reads. Neither downloads or runs T3.
+
+Configure and enable
+--------------------
+
+As administrator, set the account and runtime home in /etc/conf.d/t3code
+(quote paths containing spaces). t3code_home must be the exact path used for
+the installer and "initialize" above:
+
+  t3code_user="YOUR_EXISTING_ACCOUNT"
+  t3code_home="/ABSOLUTE/PATH/TO/THAT/ACCOUNTS/.t3"
+
+The service binds 127.0.0.1 on t3code_port (default 3773) and gets HOME from
+the account's passwd entry. Codex, Claude or OpenCode helpers must be
+installed for that account; the adapter does not install them. After
+reviewing any config-protect updates, enable and start it yourself:
+
+  rc-update add t3code default
+  rc-service t3code start
+  rc-service t3code status
+
+A missing or incomplete runtime is a startup failure; the service never
+bootstraps it. Upstream handles runtime updates and rollback. Updating the
+desktop Portage package does not update this user runtime. The service log
+is userdata/logs/openrc.log under t3code_home.
+
+Optional Tailscale Serve
+------------------------
+
+Off by default; the disabled path needs neither the Tailscale package nor a
+running daemon. To use it, build with USE=tailscale, configure and
+authenticate tailscaled separately, and check "tailscale serve status"
+first. Reserve a dedicated, otherwise unused HTTPS port for this adapter,
+do not share it with another service, and do not let T3 manage Serve
+itself. Set all three options, with the target port matching t3code_port:
+
+  t3code_tailscale="true"
+  t3code_tailscale_https_port="9443"
+  t3code_tailscale_target="http://127.0.0.1:3773"
+
+OpenRC creates the mapping after start and removes only that port on stop.
+If a post-start check fails, inspect the service status and stop the service
+before retrying, and review any mapping an interrupted start left behind. To
+change the port while running, stop with the old configuration first.
+
+Verify the deployment
+---------------------
+
+Check the environment descriptor, not a guessed /health path (the web app
+answers HTTP 200 for unknown paths). It must show the installed version and
+capabilities.serverSelfUpdate == "boot-service":
+
+  curl --fail --silent http://127.0.0.1:3773/.well-known/t3/environment | jq .
+
+Inspect process ownership and the log above. With Tailscale, read back
+"tailscale serve status" and probe the advertised HTTPS host and port, then
+confirm the local and HTTPS versions agree; a mapping alone does not prove
+remote reachability. After one approved restart, repeat the checks to
+confirm the setup survives it.

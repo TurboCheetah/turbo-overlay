@@ -6,6 +6,8 @@
 # HOME is read from this account's passwd entry, not the administrator's shell.
 t3code_user=""
 t3code_home=""
+# A missing or incomplete runtime under t3code_home is a startup failure; the
+# service never bootstraps it. See /usr/share/doc/t3code-openrc-*/README.gentoo*.
 
 # The adapter always binds 127.0.0.1. No browser or working-directory bootstrap.
 t3code_port="3773"
@@ -19,5 +21,7 @@ t3code_tailscale="false"
 # target exactly matching http://127.0.0.1:<t3code_port>. No implied proxy target.
 t3code_tailscale_https_port=""
 t3code_tailscale_target=""
+# If a post-start check fails, stop the service before retrying and review any
+# mapping left behind (README.gentoo*).
 # Readiness attempts, 1..60, with one second between attempts.
 t3code_proxy_retries="10"

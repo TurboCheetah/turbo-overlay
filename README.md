@@ -55,7 +55,8 @@ For an existing desktop installation:
    adapter install, or repository update automatically uninstalls it.
 
 For an OpenRC-hosted CLI runtime, read the
-[adapter package guide](dev-util/t3code-openrc/files/GUIDE.md) first:
+`README.gentoo` that the package installs
+(`/usr/share/doc/t3code-openrc-*/README.gentoo*`) first:
 
 1. Review the [upstream CLI installation instructions](https://github.com/pingdotgg/t3code/blob/main/docs/user/install.md#command-line)
    and [installer source](https://t3.codes/install.sh). Run a reviewed installer
@@ -65,7 +66,8 @@ For an OpenRC-hosted CLI runtime, read the
    before initializing the adapter. Do not use upstream's systemd service
    installer for this OpenRC setup.
 2. Configure that user's identity, home, and runtime home in
-   `/etc/conf.d/t3code`, following the package guide. Review Portage
+   `/etc/conf.d/t3code`, following the package
+   `README.gentoo`. Review Portage
    config-protected changes with your usual configuration-update tool rather
    than overwriting local settings. Review any old local OpenRC wrapper before
    switching to the packaged adapter.

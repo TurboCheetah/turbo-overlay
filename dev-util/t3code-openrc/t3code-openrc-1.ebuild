@@ -3,6 +3,8 @@
 
 EAPI=8
 
+inherit readme.gentoo-r1
+
 DESCRIPTION="OpenRC adapter for user-owned T3 Code server runtimes"
 HOMEPAGE="https://t3.codes/"
 S="${WORKDIR}"
@@ -29,13 +31,14 @@ src_install() {
 	newconfd "${FILESDIR}/t3code.confd" t3code
 	exeinto /usr/libexec
 	doexe "${FILESDIR}/t3code-openrc"
-	dodoc "${FILESDIR}/GUIDE.md"
+
+	readme.gentoo_create_doc
 }
 
 pkg_postinst() {
 	elog "This package installs an adapter only, not T3 or its per-user runtime."
 	elog "As the service user, install upstream T3 and explicitly initialize its state."
-	elog "Read the GUIDE.md documentation in /usr/share/doc/${PF}/ before configuring the service."
+	elog "Read /usr/share/doc/${PF}/README.gentoo* before configuring the service."
 	ewarn "Review config-protect updates and any custom /usr/local/libexec wrapper."
 	ewarn "No existing service is automatically replaced, enabled or restarted."
 }
