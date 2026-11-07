@@ -9,10 +9,10 @@ This file contains essential information for agentic coding agents working in th
 **turbo-overlay** - Gentoo overlay (package definitions for Portage)
 - Architecture: amd64
 - EAPI: 8 (all ebuilds)
-- Packages: 24 ebuilds across 9 unique packages in 5 categories
+- Packages: 27 ebuilds across 12 unique packages in 8 categories
 - Master repository: gentoo
 
-Categories: app-accessibility (hex-bin), dev-util (t3code-bin, t3code-nightly-bin, t3code-openrc, yaak-bin), media-video (hayase-bin, lossless-cut), net-im (goofcord), net-misc (ipinfo)
+Categories: acct-group (rex), acct-user (rex), app-accessibility (hex-bin), dev-util (t3code-bin, t3code-nightly-bin, t3code-openrc, yaak-bin), media-video (hayase-bin, lossless-cut), net-im (goofcord), net-misc (ipinfo), sys-apps (rex-bin)
 
 ---
 
@@ -96,6 +96,10 @@ T3 desktop packages are deprecated. Respect `metadata/update-exclusions.json`
 before checking or bumping versions. Portage owns the OpenRC adapter only;
 upstream manages the per-user runtime.
 
+### Manually pinned packages
+
+`sys-apps/rex-bin` is re-pinned by hand; see `sys-apps/rex-bin/REPIN.md`.
+
 ### Automated Updates (GitHub Actions)
 
 The workflow at `.github/workflows/check-updates.yml` runs on two schedules: daily (06:37 UTC) for nightly-channel packages (`check-updates --channel nightly`) and weekly on Sunday (07:07 UTC) for every other channel (`--exclude-channel nightly`). A manual dispatch checks all packages unless the `channel` / `exclude_channel` inputs are supplied.
@@ -169,6 +173,24 @@ DEPEND="${RDEPEND}"
 - Use `${variable}` not `$variable`
 - Conditions: `[[ ... ]]` not `[ ... ]`
 - Line length: Keep under 80-100 chars
+
+### Documentation Placement
+- Package-specific procedures and notes (re-pin recipes, upgrade steps, quirks)
+  live beside the package in `<category>/<package>/`. `AGENTS.md` carries
+  conventions and at most a one-line pointer.
+- User-facing post-install information comes from `readme.gentoo` / elog, not
+  from a hand-written guide installed with `dodoc`. This applies to new
+  packages; `dev-util/t3code-openrc` predates it and keeps its installed guide.
+
+### Generated Files
+- `Manifest` and `metadata/md5-cache/` are generated output. Regenerate them
+  with the tools (`ebuild ... manifest`, then `egencache --update`), in that
+  order.
+- Never hand-edit a cache line to match what other packages look like. If a
+  regeneration produces an ordering-only diff, commit the generated output;
+  matching style by hand desynchronises the file from its generator.
+- For a worktree, point the repo name at it with `--repositories-configuration`
+  rather than editing repo config.
 
 ### Import/Inherit Patterns
 ```bash

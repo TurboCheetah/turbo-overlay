@@ -1,0 +1,21 @@
+/var/log/rex/*.log {
+	weekly
+	rotate 4
+	missingok
+	notifempty
+	compress
+	delaycompress
+	# The services keep the log open (OpenRC redirection), so truncate in place.
+	copytruncate
+}
+
+# The login server runs as root and logs outside the rex-owned directory.
+/var/log/rex-login-server.log {
+	weekly
+	rotate 4
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+}

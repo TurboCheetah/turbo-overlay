@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<name>turbo</name>
+		<email>dev@turbo.ooo</email>
+	</maintainer>
+	<longdescription lang="en">
+		Prebuilt binary of Rex, Superlogical's terminal multiplexer (one
+		binary is both the server and the CLI). Installs OpenRC services
+		for the shared server and the multi-account login server, the
+		xterm-rex terminfo entry and, with the pam USE flag, the login
+		server's PAM policy. Closed source: upstream publishes only the
+		preview and snapshot channels, and the ebuild is pinned to one
+		release commit.
+	</longdescription>
+	<use>
+		<flag name="pam">Install the PAM policy for the Rex login server and depend on <pkg>sys-libs/pam</pkg> (the binary loads libpam at run time)</flag>
+	</use>
+</pkgmetadata>

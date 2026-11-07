@@ -1,0 +1,67 @@
+#!/sbin/openrc-run
+# shellcheck shell=sh disable=SC2034
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+description="Rex terminal multiplexer: shared server, run as the rex account"
+
+extra_started_commands="reload"
+description_reload="Reload the Rex configuration file (init.lua)"
+
+command="/usr/bin/rex"
+# /etc/conf.d/rex is sourced before this file and normally sets command_args.
+# The fallback keeps the service usable if that file is removed.
+command_args="${command_args:-server run --listen /run/rex/server.sock --state-dir /var/lib/rex --socket-mode 0660 --log-format text}"
+command_user="rex:rex"
+command_background="yes"
+# Root-owned: /run/rex belongs to the rex account, which must not be able to
+# swap the pidfile OpenRC trusts when stopping the service.
+pidfile="/run/rex.pid"
+
+output_log="${output_log:-/var/log/rex/server.log}"
+error_log="${error_log:-${output_log}}"
+
+# Closing the server ends every session; give it time to save its state.
+retry="${retry:-TERM/30/KILL/5}"
+
+depend() {
+	need localmount
+	after net
+	use logger
+	# Not a conflict (OpenRC has none): ordering makes start_pre below see
+	# the login server's state even when both are started in parallel.
+	after rex-login-server
+}
+
+start_pre() {
+	# The shared server and the login server both use /run/rex, with
+	# different ownership. Only one of them may run.
+	if service_started rex-login-server; then
+		eerror "rex-login-server is running; stop it before starting rex"
+		return 1
+	fi
+
+	# Stopping the login server leaves the per-account servers it started
+	# running, under per-account directories in /run/rex. Taking /run/rex
+	# over for the rex account while they run would hand it their runtime
+	# directories.
+	if [ -n "$(find /run/rex -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then
+		eerror "per-account servers of rex-login-server are still running (/run/rex"
+		eerror "has account directories); stop them or reboot before starting rex"
+		return 1
+	fi
+
+	# Directory holding the socket: only the rex group may enter it, which
+	# is what keeps everybody else away from the (0660) socket.
+	checkpath --directory --owner rex:rex --mode 0750 /run/rex || return 1
+	checkpath --directory --owner rex:rex --mode 0700 /var/lib/rex || return 1
+	checkpath --directory --owner rex:rex --mode 0750 /var/log/rex || return 1
+}
+
+reload() {
+	ebegin "Reloading ${RC_SVCNAME} configuration"
+	# Same effect as "rex config reload"; goes through the socket, so it
+	# needs no knowledge of the server's pid.
+	"${command}" -S /run/rex/server.sock --autostart=false config reload >/dev/null
+	eend $?
+}

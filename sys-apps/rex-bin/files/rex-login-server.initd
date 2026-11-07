@@ -1,0 +1,54 @@
+#!/sbin/openrc-run
+# shellcheck shell=sh disable=SC2034
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+description="Rex terminal multiplexer: login server, one Rex server per account"
+
+extra_started_commands="reload"
+description_reload="Reload /etc/rex/accounts.jsonc (SIGHUP, keeps sessions)"
+
+command="/usr/bin/rex"
+# /etc/conf.d/rex-login-server is sourced before this file and normally sets
+# command_args. The fallback keeps the service usable without it.
+command_args="${command_args:-login-server --listen unix:///run/rex/login-server.sock --accounts /etc/rex/accounts.jsonc --runtime-root /run/rex --log-format text --pam-service rex-login-server}"
+# Runs as root: it has to start a server as each account that logs in.
+command_background="yes"
+pidfile="/run/rex-login-server.pid"
+
+# Root-owned location: this service writes its log as root, so the path must
+# not sit in a directory the rex account can modify (symlink replacement).
+output_log="${output_log:-/var/log/rex-login-server.log}"
+error_log="${error_log:-${output_log}}"
+
+# Each account's server keeps running when the login server stops.
+retry="${retry:-TERM/30/KILL/5}"
+
+depend() {
+	need localmount
+	after net
+	use logger
+}
+
+start_pre() {
+	if service_started rex; then
+		eerror "rex (shared server) is running; stop it before starting rex-login-server"
+		return 1
+	fi
+
+	if [ ! -r /etc/rex/accounts.jsonc ]; then
+		eerror "/etc/rex/accounts.jsonc is missing"
+		return 1
+	fi
+
+	# Root-owned: --runtime-root holds the root-only login socket and the
+	# per-account runtime directories, which the login server creates itself.
+	checkpath --directory --owner root:root --mode 0755 /run/rex || return 1
+}
+
+reload() {
+	ebegin "Reloading ${RC_SVCNAME} (accounts file)"
+	# --exec: never HUP an unrelated process that reused a stale pid.
+	start-stop-daemon --signal HUP --exec "${command}" --pidfile "${pidfile}"
+	eend $?
+}

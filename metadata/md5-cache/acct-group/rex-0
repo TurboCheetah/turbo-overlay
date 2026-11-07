@@ -1,0 +1,9 @@
+DEFINED_PHASES=install preinst pretend
+DESCRIPTION=Group for the Rex terminal multiplexer shared server
+EAPI=8
+IDEPEND=!prefix? ( >=sys-apps/shadow-4.6 )
+INHERIT=acct-group
+KEYWORDS=~amd64 ~arm64
+SLOT=0
+_eclasses_=acct-group	81e55491b477037cf9ab70628d57e609	edo	e472083829a6e7ff43a197cf536728a2	edob	357e125b8c5cad0deccb625e537ea831	user-info	9bc91a5977c2453c0a861b26f65057ea
+_md5_=4c54c69bcb5293bcafcec663d88a786a
