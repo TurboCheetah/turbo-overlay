@@ -37,9 +37,8 @@ src_install() {
 }
 
 pkg_postinst() {
-	elog "This package installs an adapter only, not T3 or its per-user runtime."
-	elog "As the service user, install upstream T3 and explicitly initialize its state."
-	elog "Read /usr/share/doc/${PF}/README.gentoo* before configuring the service."
+	readme.gentoo_print_elog
+
 	ewarn "Review config-protect updates and any custom /usr/local/libexec wrapper."
 	ewarn "No existing service is automatically replaced, enabled or restarted."
 }

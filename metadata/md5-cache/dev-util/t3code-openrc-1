@@ -9,4 +9,4 @@ LICENSE=GPL-2
 RDEPEND=app-misc/jq sys-apps/coreutils sys-apps/openrc sys-apps/util-linux[su] || ( sys-libs/glibc sys-libs/musl[-headers-only] ) tailscale? ( net-misc/curl net-vpn/tailscale )
 SLOT=0
 _eclasses_=eapi9-pipestatus	d2c134036ac31c3085aebc9147f572bd	readme.gentoo-r1	9ca94b2d607e7454ca6cfb44ab8ce327
-_md5_=47850dd356c5ef28c710371eab6e01da
+_md5_=d021dde9fd17d5e08984bb0daf6ae20b
