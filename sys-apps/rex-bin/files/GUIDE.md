@@ -15,7 +15,7 @@ the `rex` group and the locked, `nologin` system user (home `/var/lib/rex`).
 | `/etc/pam.d/rex-login-server` | PAM policy, only with `USE=pam` (default) |
 | `/usr/share/terminfo/x/xterm-rex` (+ `r/rex` alias) | compiled from `rex terminfo show` at build time |
 | `/var/lib/rex` (0700), `/var/log/rex` (0750) | state (also the `rex` home) and logs, owned by `rex:rex` |
-| `/etc/logrotate.d/rex` | `copytruncate` rotation of `/var/log/rex/*.log` and `/var/log/rex-login-server.log` |
+| `/etc/logrotate.d/rex` | `copytruncate` rotation of `/var/log/rex/*.log` and `/var/log/rex-login-server.log` (the default paths only: add a rule if you set `output_log`) |
 
 Deliberately **not** installed: `/etc/ssh/ssh_config.d/50-rex.conf`. That ssh
 fallback breaks *every* `ssh` command on OpenSSH older than 7.8, and an ebuild
@@ -111,9 +111,11 @@ rc-update add rex-login-server default && rc-service rex-login-server start
 rc-service rex-login-server reload         # after editing accounts (SIGHUP, keeps sessions)
 ```
 
-It runs as root, opens a PAM session (`/etc/pam.d/rex-login-server` includes
-`system-login` like sshd does, so elogind sessions work) and runs a Rex server
-per account. It only listens on the root-only `/run/rex/login-server.sock`, so
+It runs as root and runs a Rex server per account. With `USE=pam` (default) it
+opens a PAM session for each login (`/etc/pam.d/rex-login-server` includes
+`system-login` like sshd does, so elogind sessions work); with `USE=-pam` it
+runs with `--pam=false`: shadow-based checks only, no login session, no
+elogind session. It only listens on the root-only `/run/rex/login-server.sock`, so
 it is only useful with a network listener (see below). Accounts with a
 `nologin` shell are always refused. Logs: `/var/log/rex-login-server.log`, outside
 `/var/log/rex` on purpose: the login server writes it as root, and the `rex`

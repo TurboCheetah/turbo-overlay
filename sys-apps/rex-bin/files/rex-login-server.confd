@@ -10,6 +10,9 @@ command_args="login-server --listen unix:///run/rex/login-server.sock --accounts
 
 #output_log="/var/log/rex-login-server.log"
 #error_log="${output_log}"
+# /etc/logrotate.d/rex only rotates the default path: if you change these,
+# add a matching logrotate rule (keep the file outside /var/log/rex, which the
+# rex account owns, because this service writes it as root).
 
 # Remote access: the network listener has to be on this command line.
 # Tailscale Serve (tailscaled must be running). Use tailnet-serve://, never

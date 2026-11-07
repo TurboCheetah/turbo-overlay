@@ -15,6 +15,8 @@ command_args="server run --listen /run/rex/server.sock --state-dir /var/lib/rex 
 # /etc/logrotate.d/rex when app-admin/logrotate is installed.
 #output_log="/var/log/rex/server.log"
 #error_log="${output_log}"
+# /etc/logrotate.d/rex only rotates the default path: if you change these,
+# add a matching logrotate rule.
 
 # Remote access.
 #
