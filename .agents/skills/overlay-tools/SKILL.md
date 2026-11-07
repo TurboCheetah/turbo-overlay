@@ -75,6 +75,16 @@ matches no package warns on stderr and exits `2`.
 
 **Exit Codes:** `0` = updates available, `1` = errors, `2` = all up-to-date
 
+### create-ebuild
+
+For first-time binary packaging, read [the creator guide](docs/create-ebuild.md).
+`bin/create-ebuild` previews by default; only explicit `--write` creates a new
+package. Supply maintainer identity and release/license data instead of inferring
+them. Treat generated files as incomplete starters. Review layout, dependencies
+and redistribution rights before manually generating a Manifest or running
+trusted phases. Existing packages are never overwritten; writes require Linux
+`renameat2(RENAME_NOREPLACE)` support.
+
 ### update-ebuild
 
 Bump ebuild versions with optional PR automation.
