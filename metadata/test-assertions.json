@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "packages": {
+    "=dev-util/t3code-openrc-1": [
+      {"kind": "type", "path": "etc/init.d/t3code", "type": "file"},
+      {"kind": "executable", "path": "etc/init.d/t3code"},
+      {"kind": "mode", "path": "etc/init.d/t3code", "mode": "0755"},
+      {"kind": "type", "path": "etc/conf.d/t3code", "type": "file"},
+      {"kind": "mode", "path": "etc/conf.d/t3code", "mode": "0644"},
+      {"kind": "type", "path": "usr/libexec/t3code-openrc", "type": "file"},
+      {"kind": "executable", "path": "usr/libexec/t3code-openrc"},
+      {"kind": "mode", "path": "usr/libexec/t3code-openrc", "mode": "0755"},
+      {"kind": "type", "path": "usr/share/doc/t3code-openrc-1", "type": "directory"}
+    ],
+    "=dev-util/t3code-openrc-1-r1": [
+      {"kind": "type", "path": "etc/init.d/t3code", "type": "file"},
+      {"kind": "executable", "path": "etc/init.d/t3code"},
+      {"kind": "mode", "path": "etc/init.d/t3code", "mode": "0755"},
+      {"kind": "type", "path": "etc/conf.d/t3code", "type": "file"},
+      {"kind": "mode", "path": "etc/conf.d/t3code", "mode": "0644"},
+      {"kind": "type", "path": "usr/libexec/t3code-openrc", "type": "file"},
+      {"kind": "executable", "path": "usr/libexec/t3code-openrc"},
+      {"kind": "mode", "path": "usr/libexec/t3code-openrc", "mode": "0755"},
+      {"kind": "type", "path": "usr/share/doc/t3code-openrc-1-r1", "type": "directory"}
+    ]
+  }
+}
