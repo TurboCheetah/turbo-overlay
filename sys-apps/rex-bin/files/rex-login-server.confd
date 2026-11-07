@@ -8,7 +8,7 @@
 # The ebuild appends --pam=false here when installed with USE="-pam".
 command_args="login-server --listen unix:///run/rex/login-server.sock --accounts /etc/rex/accounts.jsonc --runtime-root /run/rex --log-format text --pam-service rex-login-server"
 
-#output_log="/var/log/rex/login-server.log"
+#output_log="/var/log/rex-login-server.log"
 #error_log="${output_log}"
 
 # Remote access: the network listener has to be on this command line.

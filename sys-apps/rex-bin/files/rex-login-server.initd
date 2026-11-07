@@ -16,7 +16,9 @@ command_args="${command_args:-login-server --listen unix:///run/rex/login-server
 command_background="yes"
 pidfile="/run/rex-login-server.pid"
 
-output_log="${output_log:-/var/log/rex/login-server.log}"
+# Root-owned location: this service writes its log as root, so the path must
+# not sit in a directory the rex account can modify (symlink replacement).
+output_log="${output_log:-/var/log/rex-login-server.log}"
 error_log="${error_log:-${output_log}}"
 
 # Each account's server keeps running when the login server stops.
@@ -42,7 +44,6 @@ start_pre() {
 	# Root-owned: --runtime-root holds the root-only login socket and the
 	# per-account runtime directories, which the login server creates itself.
 	checkpath --directory --owner root:root --mode 0755 /run/rex || return 1
-	checkpath --directory --owner rex:rex --mode 0750 /var/log/rex || return 1
 }
 
 reload() {

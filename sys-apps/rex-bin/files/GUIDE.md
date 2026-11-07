@@ -15,7 +15,7 @@ the `rex` group and the locked, `nologin` system user (home `/var/lib/rex`).
 | `/etc/pam.d/rex-login-server` | PAM policy, only with `USE=pam` (default) |
 | `/usr/share/terminfo/x/xterm-rex` (+ `r/rex` alias) | compiled from `rex terminfo show` at build time |
 | `/var/lib/rex` (0700), `/var/log/rex` (0750) | state (also the `rex` home) and logs, owned by `rex:rex` |
-| `/etc/logrotate.d/rex` | `copytruncate` rotation of `/var/log/rex/*.log` |
+| `/etc/logrotate.d/rex` | `copytruncate` rotation of `/var/log/rex/*.log` and `/var/log/rex-login-server.log` |
 
 Deliberately **not** installed: `/etc/ssh/ssh_config.d/50-rex.conf`. That ssh
 fallback breaks *every* `ssh` command on OpenSSH older than 7.8, and an ebuild
@@ -81,9 +81,12 @@ rc-update del rex default            # stop starting at boot
   `rex -S /run/rex/server.sock ls`, or `export REX_SERVER=/run/rex/server.sock`.
   Access to the shared server is access to the `rex` account: anyone in the
   group can see and type into every session.
-* **Give `rex` a real shell** (`usermod --shell /bin/bash rex`), otherwise every
-  terminal prints "This account is currently not available." and exits. The
-  account stays locked (no password).
+* **Give `rex` a real shell**, otherwise every terminal prints "This account is
+  currently not available." and exits. The account stays locked (no password).
+  Set `ACCT_USER_REX_SHELL="/bin/bash"` in `make.conf` and re-emerge
+  `acct-user/rex`: `acct-user.eclass` reapplies the configured shell on every
+  reinstall, so a bare `usermod --shell /bin/bash rex` only lasts until then.
+  Use `usermod` as well if you do not want to wait for the re-emerge.
 * OpenRC has no socket activation; the service starts at boot instead.
 * `rex` and `rex-login-server` use `/run/rex` differently and refuse to run
   together; each init script checks the other (`start_pre`).
@@ -109,7 +112,9 @@ It runs as root, opens a PAM session (`/etc/pam.d/rex-login-server` includes
 `system-login` like sshd does, so elogind sessions work) and runs a Rex server
 per account. It only listens on the root-only `/run/rex/login-server.sock`, so
 it is only useful with a network listener (see below). Accounts with a
-`nologin` shell are always refused. Logs: `/var/log/rex/login-server.log`.
+`nologin` shell are always refused. Logs: `/var/log/rex-login-server.log`, outside
+`/var/log/rex` on purpose: the login server writes it as root, and the `rex`
+account owns `/var/log/rex`.
 
 ### Terminfo
 

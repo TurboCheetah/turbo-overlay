@@ -38,7 +38,12 @@ RDEPEND="
 	acct-user/rex
 	pam? ( sys-libs/pam )
 "
-BDEPEND="sys-libs/ncurses"
+# fowners in src_install resolves the account on the build host.
+BDEPEND="
+	acct-group/rex
+	acct-user/rex
+	sys-libs/ncurses
+"
 DEPEND="
 	acct-group/rex
 	acct-user/rex
@@ -60,13 +65,15 @@ export REX_SERVER=/run/rex/server.sock    # make it the default
 
 The rex account has /sbin/nologin as its shell and Rex starts every terminal
 with its account's shell, so terminals on the shared server exit at once
-until you give the account a real one:
+until you give the account a real one. Put this in make.conf and re-emerge
+acct-user/rex (a bare \"usermod --shell /bin/bash rex\" is undone the next time
+that package is reinstalled):
 
-usermod --shell /bin/bash rex
+ACCT_USER_REX_SHELL=\"/bin/bash\"
 
 Command line, extra listeners (SSH forward, Tailscale Serve, ...) are set in
 /etc/conf.d/rex; the log is /var/log/rex/server.log. For the login server
-(one server per account, PAM login) edit /etc/rex/accounts.jsonc, which
+(one server per account, PAM login, log in /var/log/rex-login-server.log) edit /etc/rex/accounts.jsonc, which
 admits nobody as shipped, and enable rex-login-server instead of rex: the two
 cannot run together.
 
