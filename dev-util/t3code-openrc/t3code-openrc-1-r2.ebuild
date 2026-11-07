@@ -16,14 +16,12 @@ IUSE="tailscale"
 
 RDEPEND="
 	app-misc/jq
+	net-misc/curl
 	sys-apps/coreutils
 	sys-apps/openrc
 	sys-apps/util-linux[su]
 	|| ( sys-libs/glibc sys-libs/musl[-headers-only] )
-	tailscale? (
-		net-misc/curl
-		net-vpn/tailscale
-	)
+	tailscale? ( net-vpn/tailscale )
 "
 
 src_install() {
