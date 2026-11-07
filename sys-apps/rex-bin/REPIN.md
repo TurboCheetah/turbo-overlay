@@ -18,8 +18,9 @@ only; `stable` returns 404.
    `version` is e.g. `0.1.0-preview.14` and `commit` is a 40-hex SHA. The
    ebuild maps `PV` `0.1.0_pre14` to that version (`MY_PV="${PV/_pre/-preview.}"`).
 
-2. Copy the ebuild to the new `PV` and set `MY_COMMIT`. `MY_PV` and the
-   `SRC_URI` follow from `PV` and `MY_COMMIT`.
+2. From the overlay root, copy `sys-apps/rex-bin/rex-bin-<old>.ebuild` to the
+   new `PV` and set `MY_COMMIT`. `MY_PV` and `SRC_URI` follow from `PV` and
+   `MY_COMMIT`.
 
 3. The four distfiles are the `artifacts[]` entries named
    `rex-linux-{amd64,arm64}{,-musl}.tar.gz`, fetched from
@@ -29,7 +30,7 @@ only; `stable` returns 404.
 4. Generate the Manifest, which fetches all four:
 
    ```sh
-   ebuild rex-bin-<new>.ebuild manifest
+   ebuild sys-apps/rex-bin/rex-bin-<new>.ebuild manifest
    ```
 
    Then compare each distfile with upstream's own checksum before trusting it:
