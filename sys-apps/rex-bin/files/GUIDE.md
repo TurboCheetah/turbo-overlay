@@ -63,7 +63,7 @@ with `--pam=false` (shadow-based checks, no login session). The binary only
 
 ```sh
 rc-update add rex default            # start at boot
-rc-service rex start|stop|restart|reload|status
+rc-service rex start                # or: stop, restart, reload, status
 rc-update del rex default            # stop starting at boot
 ```
 
@@ -75,7 +75,7 @@ rc-update del rex default            # stop starting at boot
 * The init script runs the server as `rex:rex`, creates `/run/rex` (`rex:rex`,
   0750: only the group can enter, which protects the 0660 socket),
   `/var/lib/rex` and `/var/log/rex` with `checkpath`, and keeps a pidfile at
-  `/run/rex/rex.pid`. Logs go to `/var/log/rex/server.log`.
+  `/run/rex.pid`. Logs go to `/var/log/rex/server.log`.
 * **Using it**: put users in the `rex` group (`gpasswd -a alice rex`, log in
   again) and point their client at the socket:
   `rex -S /run/rex/server.sock ls`, or `export REX_SERVER=/run/rex/server.sock`.
@@ -113,7 +113,8 @@ it is only useful with a network listener (see below). Accounts with a
 
 ### Terminfo
 
-`xterm-rex` is installed system-wide, so `infocmp xterm-rex` works. A new
+On native builds `xterm-rex` is installed system-wide, so `infocmp xterm-rex`
+works (a cross-compile cannot run the binary and skips it). A new
 terminal still only claims `xterm-rex` once the ssh fallback exists, otherwise
 it falls back to `xterm-256color`. Check and fix per account:
 
@@ -147,8 +148,10 @@ pkgcheck scan -f latest sys-apps/rex-bin
 
 Cross-check the Manifest against upstream's own checksums (the
 `artifacts[].sha256` in the release JSON; fields `filename`, `arch`, `libc`)
-before trusting it. The ebuild also refuses to build if the binary's
-`rex version` does not report exactly the version and commit it pins. Then
+before trusting it. On native builds the ebuild also refuses to build if the
+binary's `rex version` does not report exactly the version and commit it pins;
+cross-compiles cannot run the binary, so they skip that check (and the
+terminfo entry). Then
 `emerge --ask sys-apps/rex-bin` and `rc-service rex restart` (ends all
 sessions, see above).
 
@@ -186,7 +189,10 @@ rex -S host ls
 
 ### 2. Tailscale Serve (shared or login server)
 
-In `/etc/conf.d/rex`:
+For the shared server, in `/etc/conf.d/rex` (the login server reads
+`/etc/conf.d/rex-login-server` instead: append the same `--extra-listen`
+option and `rc_need` to its `command_args`, as the commented example there
+shows, and restart `rex-login-server`):
 
 ```sh
 command_args="server run --listen /run/rex/server.sock --state-dir /var/lib/rex --socket-mode 0660 --log-format text --extra-listen tailnet-serve:///run/rex/serve.sock"

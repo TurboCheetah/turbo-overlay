@@ -41,8 +41,8 @@ start_pre() {
 
 	# Root-owned: --runtime-root holds the root-only login socket and the
 	# per-account runtime directories, which the login server creates itself.
-	checkpath --directory --owner root:root --mode 0755 /run/rex
-	checkpath --directory --owner rex:rex --mode 0750 /var/log/rex
+	checkpath --directory --owner root:root --mode 0755 /run/rex || return 1
+	checkpath --directory --owner rex:rex --mode 0750 /var/log/rex || return 1
 }
 
 reload() {

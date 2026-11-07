@@ -14,7 +14,9 @@ command="/usr/bin/rex"
 command_args="${command_args:-server run --listen /run/rex/server.sock --state-dir /var/lib/rex --socket-mode 0660 --log-format text}"
 command_user="rex:rex"
 command_background="yes"
-pidfile="/run/rex/rex.pid"
+# Root-owned: /run/rex belongs to the rex account, which must not be able to
+# swap the pidfile OpenRC trusts when stopping the service.
+pidfile="/run/rex.pid"
 
 output_log="${output_log:-/var/log/rex/server.log}"
 error_log="${error_log:-${output_log}}"
@@ -26,6 +28,9 @@ depend() {
 	need localmount
 	after net
 	use logger
+	# Not a conflict (OpenRC has none): ordering makes start_pre below see
+	# the login server's state even when both are started in parallel.
+	after rex-login-server
 }
 
 start_pre() {
@@ -38,9 +43,9 @@ start_pre() {
 
 	# Directory holding the socket: only the rex group may enter it, which
 	# is what keeps everybody else away from the (0660) socket.
-	checkpath --directory --owner rex:rex --mode 0750 /run/rex
-	checkpath --directory --owner rex:rex --mode 0700 /var/lib/rex
-	checkpath --directory --owner rex:rex --mode 0750 /var/log/rex
+	checkpath --directory --owner rex:rex --mode 0750 /run/rex || return 1
+	checkpath --directory --owner rex:rex --mode 0700 /var/lib/rex || return 1
+	checkpath --directory --owner rex:rex --mode 0750 /var/log/rex || return 1
 }
 
 reload() {

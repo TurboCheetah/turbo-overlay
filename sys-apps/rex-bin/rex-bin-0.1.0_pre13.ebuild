@@ -120,8 +120,11 @@ src_install() {
 		newpamd "${FILESDIR}/rex-login-server.pam" rex-login-server
 	else
 		# No libpam to load: the login server does its own shadow checks.
+		# The init script carries the same command line as a fallback for
+		# a removed conf.d file.
 		sed -i -e 's/--pam-service rex-login-server/& --pam=false/' \
-			"${ED}/etc/conf.d/rex-login-server" || die
+			"${ED}/etc/conf.d/rex-login-server" \
+			"${ED}/etc/init.d/rex-login-server" || die
 	fi
 
 	# State directory (also the rex account's home) and log directory.
@@ -136,10 +139,24 @@ src_install() {
 
 pkg_postinst() {
 	readme.gentoo_print_elog
+
+	# /etc/conf.d is config-protected, so an existing file keeps the
+	# command line it was installed with and the sed in src_install only
+	# reaches new installs.
+	if ! use pam && [[ -f ${EROOT}/etc/conf.d/rex-login-server ]] &&
+		! grep -q -e '--pam=false' "${EROOT}/etc/conf.d/rex-login-server"
+	then
+		ewarn "USE=-pam, but ${EROOT}/etc/conf.d/rex-login-server does not pass"
+		ewarn "--pam=false, so the login server would still ask for PAM."
+		ewarn "Add --pam=false to its command_args (or merge the new file with"
+		ewarn "dispatch-conf/etc-update) before starting rex-login-server."
+	fi
 }
 
 pkg_prerm() {
-	if [[ -z ${REPLACED_BY_VERSION} && -S ${EROOT}/run/rex/server.sock ]]; then
+	if [[ -z ${REPLACED_BY_VERSION} ]] &&
+		[[ -S ${EROOT}/run/rex/server.sock || -S ${EROOT}/run/rex/login-server.sock ]]
+	then
 		ewarn "A Rex server is still running. Stop it with \"rc-service rex stop\""
 		ewarn "(or rex-login-server) before the init scripts disappear."
 	fi
