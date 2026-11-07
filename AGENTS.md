@@ -182,6 +182,16 @@ DEPEND="${RDEPEND}"
   from a hand-written guide installed with `dodoc`. This applies to new
   packages; `dev-util/t3code-openrc` predates it and keeps its installed guide.
 
+### Generated Files
+- `Manifest` and `metadata/md5-cache/` are generated output. Regenerate them
+  with the tools (`ebuild ... manifest`, then `egencache --update`), in that
+  order.
+- Never hand-edit a cache line to match what other packages look like. If a
+  regeneration produces an ordering-only diff, commit the generated output;
+  matching style by hand desynchronises the file from its generator.
+- For a worktree, point the repo name at it with `--repositories-configuration`
+  rather than editing repo config.
+
 ### Import/Inherit Patterns
 ```bash
 # Binary packages (.deb, .pkg.tar.zst, AppImage)
