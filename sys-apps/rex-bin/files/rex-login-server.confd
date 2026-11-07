@@ -1,0 +1,19 @@
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+# shellcheck shell=sh disable=SC2034
+
+# /etc/conf.d/rex-login-server
+
+# Command line of the Rex login server, without the leading /usr/bin/rex.
+# The ebuild appends --pam=false here when installed with USE="-pam".
+command_args="login-server --listen unix:///run/rex/login-server.sock --accounts /etc/rex/accounts.jsonc --runtime-root /run/rex --log-format text --pam-service rex-login-server"
+
+#output_log="/var/log/rex/login-server.log"
+#error_log="${output_log}"
+
+# Remote access: the network listener has to be on this command line.
+# Tailscale Serve (tailscaled must be running). Use tailnet-serve://, never
+# unix://. Then run, once:
+#   tailscale serve --bg --https=443 unix:/run/rex/serve.sock
+#command_args="${command_args} --extra-listen tailnet-serve:///run/rex/serve.sock"
+#rc_need="tailscale"

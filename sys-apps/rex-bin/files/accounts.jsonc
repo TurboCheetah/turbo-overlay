@@ -1,0 +1,19 @@
+// Accounts the Rex login server may open sessions for (rex-login-server only;
+// the shared server does not read this file).
+//
+// Empty as shipped, which admits nobody. Example: let Alice use her own
+// account and root, connecting as alice unless she asks for root:
+//
+//   "accounts": {
+//     "alice": { "principals": ["tailscale:alice@example.com"] },
+//     "root":  { "principals": ["tailscale:alice@example.com"] },
+//   },
+//   "defaults": { "tailscale:alice@example.com": "alice" },
+//
+// Principals: tailscale:USER@EXAMPLE, tailscale:tag:NAME, tailscale:*,
+// tailscale:tag:*, peer:UID (local user), identified, anonymous.
+// Reload after editing: rc-service rex-login-server reload
+{
+  "version": 1,
+  "accounts": {},
+}

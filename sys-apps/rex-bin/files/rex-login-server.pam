@@ -1,0 +1,12 @@
+#%PAM-1.0
+# PAM policy of the Rex login server (rex login-server --pam-service
+# rex-login-server).
+#
+# Rex has already identified the caller (Tailscale identity or local peer
+# credentials) before PAM runs, so no password is asked for, as with sshd
+# and public keys. PAM only decides whether the account may log in at all
+# (locked, expired, /etc/nologin, access.conf, time.conf) and sets up the
+# login session (limits, environment, elogind session).
+auth		required	pam_permit.so
+account		include		system-login
+session		include		system-login
