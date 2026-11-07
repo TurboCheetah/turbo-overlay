@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OVERLAY_TOOLS_DIR="$(dirname "$SCRIPT_DIR")"
+
+if ! command -v uv >/dev/null 2>&1; then
+    printf '%s\n' 'overlay-info: error: uv is required but not installed' >&2
+    exit 127
+fi
+
+# Inspect only. Never sync dependencies or use the network on this command.
+# Isolate Python startup from the caller and pin imports to this wrapper's source,
+# even when an existing environment has another checkout installed as editable.
+exec uv run --offline --no-sync --project "$OVERLAY_TOOLS_DIR" \
+    python -I -B -c '
+import sys
+from pathlib import Path
+source = Path(sys.argv.pop(1)).resolve()
+sys.path.insert(0, str(source))
+from overlay_tools.cli import overlay_info
+if Path(overlay_info.__file__).resolve() != source / "overlay_tools/cli/overlay_info.py":
+    sys.exit("overlay-info: error: tools source does not match the wrapper")
+sys.exit(overlay_info.main())
+' "$OVERLAY_TOOLS_DIR/src" "$@"
