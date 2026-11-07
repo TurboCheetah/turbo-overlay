@@ -6,7 +6,7 @@ EAPI=8
 inherit pam readme.gentoo-r1 toolchain-funcs
 
 # Upstream pin, from https://blob.superlogical.com/api/releases/rex/preview
-# (see GUIDE.md for the re-pin procedure).
+# (the re-pin procedure is in AGENTS.md, "Rex re-pin").
 MY_PV="${PV/_pre/-preview.}"
 MY_COMMIT="1b6654811346488b696ded8f3c7e6701c57242f1"
 MY_URI="https://blob.superlogical.com/download/rex/preview/${MY_COMMIT}"
@@ -73,9 +73,12 @@ ACCT_USER_REX_SHELL=\"/bin/bash\"
 
 Command line, extra listeners (SSH forward, Tailscale Serve, ...) are set in
 /etc/conf.d/rex; the log is /var/log/rex/server.log. For the login server
-(one server per account, PAM login, log in /var/log/rex-login-server.log) edit /etc/rex/accounts.jsonc, which
-admits nobody as shipped, and enable rex-login-server instead of rex: the two
-cannot run together.
+(one server per account, PAM login, log in /var/log/rex-login-server.log)
+edit /etc/rex/accounts.jsonc, which admits nobody as shipped, and enable
+rex-login-server instead of rex: the two cannot run together. Stopping
+rex-login-server leaves the per-account servers it started running, and rex
+refuses to start while /run/rex still holds their directories, so stop those
+servers or reboot before switching back.
 
 xterm-rex is installed system-wide, but each account still needs
 \"rex terminfo setup\" once. It also writes an ssh fallback, which only works
@@ -83,8 +86,13 @@ with OpenSSH 7.8 or newer and makes every ssh command fail on older versions;
 that is why this package does not install /etc/ssh/ssh_config.d/50-rex.conf.
 
 A running server keeps the old binary after an upgrade. Restarting it with
-\"rc-service rex restart\" ends every session on it. See
-/usr/share/doc/${PF}/GUIDE.md for more."
+\"rc-service rex restart\" ends every session on it. That is also how to
+recover from a crash (\"restart\", not \"start\"); only root sees the
+\"crashed\" state, non-root \"rc-service rex status\" keeps saying \"started\".
+
+Do not also run upstream's \"install.sh --tarball\": it installs
+/usr/local/bin/rex, which normally comes before /usr/bin in PATH and would
+shadow this package."
 
 src_compile() {
 	# The terminfo source only comes from the binary, which cannot run when
@@ -140,7 +148,6 @@ src_install() {
 	fperms 0700 /var/lib/rex
 	fperms 0750 /var/log/rex
 
-	dodoc "${FILESDIR}/GUIDE.md"
 	readme.gentoo_create_doc
 }
 

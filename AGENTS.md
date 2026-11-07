@@ -96,6 +96,28 @@ T3 desktop packages are deprecated. Respect `metadata/update-exclusions.json`
 before checking or bumping versions. Portage owns the OpenRC adapter only;
 upstream manages the per-user runtime.
 
+### Rex re-pin
+
+`sys-apps/rex-bin` is a closed-source prebuilt pinned to one upstream release
+commit (`MY_COMMIT`) and is excluded from update automation. Upstream publishes
+only the `preview` and `snapshot` channels; `stable` returns 404.
+
+```bash
+curl -fsS https://blob.superlogical.com/api/releases/rex/preview | python3 -m json.tool | head -8
+# "version": "0.1.0-preview.14", "commit": "<40 hex>"
+cd sys-apps/rex-bin
+cp rex-bin-0.1.0_pre13.ebuild rex-bin-0.1.0_pre14.ebuild   # preview.14 -> _pre14
+$EDITOR rex-bin-0.1.0_pre14.ebuild                         # set MY_COMMIT
+ebuild rex-bin-0.1.0_pre14.ebuild manifest                 # fetches all four distfiles
+```
+
+Compare the Manifest with `artifacts[].sha256` in the release JSON, then
+regenerate `metadata/md5-cache` (after the Manifest, never before) and run
+`pkgcheck scan -f latest sys-apps/rex-bin`. The ebuild refuses a native build
+whose `rex version` does not report the pinned version and commit. The
+`snapshot` channel's version string does not follow the preview scheme and sorts
+below any `0.1.0_pre*`, so it needs its own ebuild with the channel in `MY_URI`.
+
 ### Automated Updates (GitHub Actions)
 
 The workflow at `.github/workflows/check-updates.yml` runs on two schedules: daily (06:37 UTC) for nightly-channel packages (`check-updates --channel nightly`) and weekly on Sunday (07:07 UTC) for every other channel (`--exclude-channel nightly`). A manual dispatch checks all packages unless the `channel` / `exclude_channel` inputs are supplied.

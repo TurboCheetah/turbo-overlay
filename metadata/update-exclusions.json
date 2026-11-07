@@ -2,7 +2,7 @@
   "dev-util/t3code-bin": "Desktop package deprecated; use upstream desktop installers. See README.md#t3-code-desktop-and-openrc.",
   "dev-util/t3code-nightly-bin": "Desktop package deprecated; use upstream desktop installers. See README.md#t3-code-desktop-and-openrc.",
   "dev-util/t3code-openrc": "Locally versioned OpenRC adapter; upstream runtime releases and nightly tags do not bump this package.",
-  "sys-apps/rex-bin": "Closed-source prebuilt pinned to an upstream release commit; re-pinned by hand, see sys-apps/rex-bin/files/GUIDE.md.",
+  "sys-apps/rex-bin": "Closed-source prebuilt pinned to an upstream release commit; re-pinned by hand, see the Rex re-pin section of AGENTS.md.",
   "acct-group/rex": "Local service group for sys-apps/rex-bin; has no upstream.",
   "acct-user/rex": "Local service user for sys-apps/rex-bin; has no upstream."
 }

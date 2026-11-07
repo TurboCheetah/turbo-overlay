@@ -12,8 +12,7 @@
 		xterm-rex terminfo entry and, with the pam USE flag, the login
 		server's PAM policy. Closed source: upstream publishes only the
 		preview and snapshot channels, and the ebuild is pinned to one
-		release commit. See the installed GUIDE.md for the re-pin
-		procedure.
+		release commit.
 	</longdescription>
 	<use>
 		<flag name="pam">Install the PAM policy for the Rex login server and depend on <pkg>sys-libs/pam</pkg> (the binary loads libpam at run time)</flag>
