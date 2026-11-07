@@ -48,6 +48,7 @@ start_pre() {
 
 reload() {
 	ebegin "Reloading ${RC_SVCNAME} (accounts file)"
-	start-stop-daemon --signal HUP --pidfile "${pidfile}"
+	# --exec: never HUP an unrelated process that reused a stale pid.
+	start-stop-daemon --signal HUP --exec "${command}" --pidfile "${pidfile}"
 	eend $?
 }

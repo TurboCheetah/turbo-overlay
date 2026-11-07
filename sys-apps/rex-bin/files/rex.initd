@@ -41,6 +41,16 @@ start_pre() {
 		return 1
 	fi
 
+	# Stopping the login server leaves the per-account servers it started
+	# running, under per-account directories in /run/rex. Taking /run/rex
+	# over for the rex account while they run would hand it their runtime
+	# directories.
+	if [ -n "$(find /run/rex -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then
+		eerror "per-account servers of rex-login-server are still running (/run/rex"
+		eerror "has account directories); stop them or reboot before starting rex"
+		return 1
+	fi
+
 	# Directory holding the socket: only the rex group may enter it, which
 	# is what keeps everybody else away from the (0660) socket.
 	checkpath --directory --owner rex:rex --mode 0750 /run/rex || return 1

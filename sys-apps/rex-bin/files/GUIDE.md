@@ -89,15 +89,18 @@ rc-update del rex default            # stop starting at boot
   Use `usermod` as well if you do not want to wait for the re-emerge.
 * OpenRC has no socket activation; the service starts at boot instead.
 * `rex` and `rex-login-server` use `/run/rex` differently and refuse to run
-  together; each init script checks the other (`start_pre`).
+  together; each init script checks the other (`start_pre`). Stopping the login
+  server leaves the per-account servers it started running, and `rex` refuses
+  to start while `/run/rex` still holds their directories: stop those servers
+  or reboot first.
 * Restarting, stopping or upgrading ends every program in every session. The
   layout of sessions is restored from `/var/lib/rex`; running programs are not
   (they get a fresh shell). A running server keeps the old binary after an
   upgrade, so restart it when nobody is working.
 * A crashed daemon shows as `crashed` to root and OpenRC needs `restart` (not
-  `start`) to recover; stale sockets are handled by Rex itself. Non-root
-  `rc-service rex status` always says `started`, because the pidfile sits in
-  `/run/rex`, which only the `rex` group can read. Use root for status.
+  `start`) to recover; stale sockets are handled by Rex itself. Only root sees
+  `crashed`: non-root `rc-service rex status` keeps reporting `started` after
+  a crash. Use root for status.
 
 ### Login server (alternative to the shared server)
 
@@ -196,8 +199,8 @@ rex -S host ls
 
 For the shared server, in `/etc/conf.d/rex` (the login server reads
 `/etc/conf.d/rex-login-server` instead: append the same `--extra-listen`
-option and `rc_need` to its `command_args`, as the commented example there
-shows, and restart `rex-login-server`):
+option to its `command_args` and set `rc_need="tailscale"` there too, as the
+commented example shows, and restart `rex-login-server`):
 
 ```sh
 command_args="server run --listen /run/rex/server.sock --state-dir /var/lib/rex --socket-mode 0660 --log-format text --extra-listen tailnet-serve:///run/rex/serve.sock"
