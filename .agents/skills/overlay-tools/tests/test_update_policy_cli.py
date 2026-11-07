@@ -276,5 +276,11 @@ def test_checked_in_policy_excludes_the_retired_atoms():
     """The shipped policy, not only the fixture map, must carry these atoms."""
     repo_root = Path(__file__).resolve().parents[4]
     exclusions = load_update_exclusions(repo_root)
-    assert set(exclusions) == set(EXCLUSIONS)
+    # The retired T3 atoms plus the Rex packages, which are re-pinned by hand
+    # (rex-bin) or have no upstream (the account packages).
+    assert set(exclusions) == set(EXCLUSIONS) | {
+        "sys-apps/rex-bin",
+        "acct-group/rex",
+        "acct-user/rex",
+    }
     assert all(reason.strip() for reason in exclusions.values())

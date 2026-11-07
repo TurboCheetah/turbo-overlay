@@ -9,10 +9,10 @@ This file contains essential information for agentic coding agents working in th
 **turbo-overlay** - Gentoo overlay (package definitions for Portage)
 - Architecture: amd64
 - EAPI: 8 (all ebuilds)
-- Packages: 24 ebuilds across 9 unique packages in 5 categories
+- Packages: 27 ebuilds across 12 unique packages in 8 categories
 - Master repository: gentoo
 
-Categories: app-accessibility (hex-bin), dev-util (t3code-bin, t3code-nightly-bin, t3code-openrc, yaak-bin), media-video (hayase-bin, lossless-cut), net-im (goofcord), net-misc (ipinfo)
+Categories: acct-group (rex), acct-user (rex), app-accessibility (hex-bin), dev-util (t3code-bin, t3code-nightly-bin, t3code-openrc, yaak-bin), media-video (hayase-bin, lossless-cut), net-im (goofcord), net-misc (ipinfo), sys-apps (rex-bin)
 
 ---
 

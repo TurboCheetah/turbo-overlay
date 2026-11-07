@@ -1,0 +1,41 @@
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+# shellcheck shell=sh disable=SC2034
+
+# /etc/conf.d/rex
+
+# Command line of the shared Rex server, without the leading /usr/bin/rex.
+# Keep the four core options: the socket path and mode are what the "rex"
+# group relies on, and the state directory is the rex account's home.
+# Run "rex server run --help" for every option (--max-sessions, --config,
+# --block-dir, ...).
+command_args="server run --listen /run/rex/server.sock --state-dir /var/lib/rex --socket-mode 0660 --log-format text"
+
+# Log file. Rex writes to stderr/stdout; rotation is handled by
+# /etc/logrotate.d/rex when app-admin/logrotate is installed.
+#output_log="/var/log/rex/server.log"
+#error_log="${output_log}"
+
+# Remote access.
+#
+# "rex server start" does not persist its options, so a network listener has
+# to be part of command_args above.
+#
+# Tailscale Serve (tailscaled must be running). Use tailnet-serve://, never
+# unix://, for the Serve socket: with unix:// every tailnet caller would be
+# treated as the account running tailscaled. Then run, once:
+#   tailscale serve --bg --https=443 unix:/run/rex/serve.sock
+#command_args="${command_args} --extra-listen tailnet-serve:///run/rex/serve.sock"
+#rc_need="tailscale"
+# By default only the Tailscale user owning this machine is admitted. On a
+# TAGGED machine (no owner) the server refuses to start at all ("owner-only
+# admission admits nobody") unless you also admit identified callers, i.e.
+# everyone your tailnet ACLs let reach this machine, who then get full
+# access to the rex account:
+#command_args="${command_args} --tailnet-allow-identified"
+#
+# Built-in Tailscale (needs MagicDNS and HTTPS certificates in the tailnet;
+# first login URL shows up in the log):
+#command_args="${command_args} --tailscale"
+#
+# SSH needs no listener: forward /run/rex/server.sock from the client.
