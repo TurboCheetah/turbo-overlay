@@ -113,10 +113,21 @@ ebuild rex-bin-0.1.0_pre14.ebuild manifest                 # fetches all four di
 
 Compare the Manifest with `artifacts[].sha256` in the release JSON, then
 regenerate `metadata/md5-cache` (after the Manifest, never before) and run
-`pkgcheck scan -f latest sys-apps/rex-bin`. The ebuild refuses a native build
-whose `rex version` does not report the pinned version and commit. The
+`pkgcheck`:
+
+```bash
+egencache --repo turbo-overlay --update sys-apps/rex-bin
+pkgcheck scan -f latest sys-apps/rex-bin
+```
+
+`egencache` needs the checkout to be the configured `turbo-overlay` repository;
+for a worktree, pass `--repositories-configuration` pointing that name at it.
+The ebuild refuses a native build whose `rex version` does not report the
+pinned version and commit. The
 `snapshot` channel's version string does not follow the preview scheme and sorts
-below any `0.1.0_pre*`, so it needs its own ebuild with the channel in `MY_URI`.
+below any `0.1.0_pre*`, so it needs its own ebuild with the channel in `MY_URI`, `MY_PV` set to the
+version `rex version` prints (the preview-derived `MY_PV` makes a native build
+reject the snapshot binary) and `MY_COMMIT` set.
 
 ### Automated Updates (GitHub Actions)
 

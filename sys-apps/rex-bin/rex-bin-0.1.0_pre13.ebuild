@@ -73,8 +73,10 @@ ACCT_USER_REX_SHELL=\"/bin/bash\"
 
 Command line, extra listeners (SSH forward, Tailscale Serve, ...) are set in
 /etc/conf.d/rex; the log is /var/log/rex/server.log. For the login server
-(one server per account, PAM login, log in /var/log/rex-login-server.log)
-edit /etc/rex/accounts.jsonc, which admits nobody as shipped, and enable
+(one server per account, log in /var/log/rex-login-server.log; with USE=pam
+it opens a PAM session per login, with USE=-pam it only does shadow-based
+checks and no login session) edit /etc/rex/accounts.jsonc, which admits
+nobody as shipped, and enable
 rex-login-server instead of rex: the two cannot run together. Stopping
 rex-login-server leaves the per-account servers it started running, and rex
 refuses to start while /run/rex still holds their directories, so stop those
