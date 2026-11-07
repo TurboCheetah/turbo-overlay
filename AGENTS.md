@@ -96,38 +96,9 @@ T3 desktop packages are deprecated. Respect `metadata/update-exclusions.json`
 before checking or bumping versions. Portage owns the OpenRC adapter only;
 upstream manages the per-user runtime.
 
-### Rex re-pin
+### Manually pinned packages
 
-`sys-apps/rex-bin` is a closed-source prebuilt pinned to one upstream release
-commit (`MY_COMMIT`) and is excluded from update automation. Upstream publishes
-only the `preview` and `snapshot` channels; `stable` returns 404.
-
-```bash
-curl -fsS https://blob.superlogical.com/api/releases/rex/preview | python3 -m json.tool | head -8
-# "version": "0.1.0-preview.14", "commit": "<40 hex>"
-cd sys-apps/rex-bin
-cp rex-bin-0.1.0_pre13.ebuild rex-bin-0.1.0_pre14.ebuild   # preview.14 -> _pre14
-$EDITOR rex-bin-0.1.0_pre14.ebuild                         # set MY_COMMIT
-ebuild rex-bin-0.1.0_pre14.ebuild manifest                 # fetches all four distfiles
-```
-
-Compare the Manifest with `artifacts[].sha256` in the release JSON, then
-regenerate `metadata/md5-cache` (after the Manifest, never before) and run
-`pkgcheck`:
-
-```bash
-egencache --repo turbo-overlay --update sys-apps/rex-bin
-pkgcheck scan -f latest sys-apps/rex-bin
-```
-
-`egencache` needs the checkout to be the configured `turbo-overlay` repository;
-for a worktree, pass `--repositories-configuration` pointing that name at it.
-The ebuild refuses a native build whose `rex version` does not report the
-pinned version and commit. The
-`snapshot` channel's version string does not follow the preview scheme and sorts
-below any `0.1.0_pre*`, so it needs its own ebuild with the channel in `MY_URI`, `MY_PV` set to the
-version `rex version` prints (the preview-derived `MY_PV` makes a native build
-reject the snapshot binary) and `MY_COMMIT` set.
+`sys-apps/rex-bin` is re-pinned by hand; see `sys-apps/rex-bin/REPIN.md`.
 
 ### Automated Updates (GitHub Actions)
 
@@ -202,6 +173,13 @@ DEPEND="${RDEPEND}"
 - Use `${variable}` not `$variable`
 - Conditions: `[[ ... ]]` not `[ ... ]`
 - Line length: Keep under 80-100 chars
+
+### Documentation Placement
+- Package-specific procedures and notes (re-pin recipes, upgrade steps, quirks)
+  live beside the package in `<category>/<package>/`. `AGENTS.md` carries
+  conventions and at most a one-line pointer.
+- User-facing post-install information comes from `readme.gentoo` / elog, not
+  from a hand-written guide installed with `dodoc`.
 
 ### Import/Inherit Patterns
 ```bash

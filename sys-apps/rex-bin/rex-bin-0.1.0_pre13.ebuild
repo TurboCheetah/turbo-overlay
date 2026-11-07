@@ -6,7 +6,7 @@ EAPI=8
 inherit pam readme.gentoo-r1 toolchain-funcs
 
 # Upstream pin, from https://blob.superlogical.com/api/releases/rex/preview
-# (the re-pin procedure is in AGENTS.md, "Rex re-pin").
+# (the re-pin procedure is in REPIN.md next to this ebuild).
 MY_PV="${PV/_pre/-preview.}"
 MY_COMMIT="1b6654811346488b696ded8f3c7e6701c57242f1"
 MY_URI="https://blob.superlogical.com/download/rex/preview/${MY_COMMIT}"
