@@ -37,13 +37,18 @@ src_install() {
 }
 
 pkg_postinst() {
-	# -1 and -1-r1 installed the documentation without ever printing it, and
-	# readme.gentoo_print_elog stays silent on upgrades. Print it once when
-	# upgrading from either, so those users see it. -1-r2 and later printed it
-	# on their first install, so upgrading from them stays quiet.
+	# readme.gentoo_print_elog is silent on upgrades, and -1 and -1-r1 installed
+	# the documentation without ever printing it. -1-r2 printed it on a fresh
+	# install only, so a host that reached -1-r2 by upgrading from -1 or -1-r1
+	# never saw it either. Print it once when replacing any of those.
+	#
+	# Accepted trade: a host that installed -1-r2 fresh already saw the doc and
+	# will see it once more on its move to -1-r3. That duplicate is deliberate,
+	# because the ebuild cannot tell the two -1-r2 cohorts apart and a silent gap
+	# is worse than a repeat. Upgrading from -1-r3 or later stays quiet.
 	local v
 	for v in ${REPLACING_VERSIONS}; do
-		ver_test "${v}" -lt 1-r2 && FORCE_PRINT_ELOG=1
+		ver_test "${v}" -le 1-r2 && FORCE_PRINT_ELOG=1
 	done
 	readme.gentoo_print_elog
 
