@@ -12,9 +12,9 @@ merge config-protect updates (dispatch-conf) deliberately. Protocol-2 Node
 runtimes and copied launchers are incompatible and need a separate, backed-up
 migration; "initialize" refuses any existing state.
 
-1. As the non-root service user, install the runtime. This needs
-   net-misc/curl. Read the script first, and never run "t3 service install"
-   on OpenRC (upstream's service manager integration expects systemd):
+1. As the non-root service user, install the runtime. Read the script first,
+   and never run "t3 service install" on OpenRC (upstream's service manager
+   integration expects systemd):
 
      curl --fail --location --output ./t3-install.sh https://t3.codes/install.sh
      less ./t3-install.sh
