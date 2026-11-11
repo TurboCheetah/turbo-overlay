@@ -1,0 +1,57 @@
+#!/usr/bin/env -S python3 -I -S -B
+"""Isolated stdlib bootstrap. Invoke directly, never through Bash."""
+
+import os
+import sys
+from pathlib import Path
+
+TOOLS = Path(__file__).resolve().parent.parent
+PYTHON = TOOLS / ".venv/bin/python"
+
+
+def informational_requested() -> bool:
+    """Recover only an exact flag before --, never an option value or filename."""
+    needs_value = False
+    for argument in sys.argv[1:]:
+        if argument == "--":
+            break
+        if needs_value:
+            needs_value = False
+        elif argument in {"--overlay-path", "--changed-since"}:
+            needs_value = True
+        elif argument == "--informational":
+            return True
+    return False
+
+
+if not os.access(PYTHON, os.X_OK):
+    print(
+        "INCONCLUSIVE: overlay-tools .venv is missing; "
+        "initialize explicitly with uv sync --locked --group dev",
+        file=sys.stderr,
+    )
+    if informational_requested():
+        print(
+            "informational wrapper exit: 0; authoritative QA exit: 2; not package PASS",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+    sys.exit(2)
+
+# The host bootstrap skips site initialization too. Only the explicitly trusted
+# provisioned environment initializes site hooks. Source and arguments are argv.
+os.execv(
+    str(PYTHON),
+    [
+        str(PYTHON),
+        "-I",
+        "-B",
+        "-c",
+        (
+            "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+            'runpy.run_module("overlay_tools.cli.qa_ebuild_check",run_name="__main__",alter_sys=True)'
+        ),
+        str(TOOLS / "src"),
+        *sys.argv[1:],
+    ],
+)

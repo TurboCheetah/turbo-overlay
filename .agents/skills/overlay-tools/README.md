@@ -75,6 +75,43 @@ This file controls maintenance automation only. `profiles/package.mask`
 controls Portage package selection independently; a mask alone does not stop
 updates, and an update exclusion does not mask or uninstall a package.
 
+### Read-only local QA
+
+Provision the tools environment once before using the QA launchers. This setup
+can download dependencies and write the tools `.venv`; it is not a QA scan:
+
+```bash
+(cd .agents/skills/overlay-tools && uv sync --locked --group dev)
+```
+
+Then run QA against an explicit checkout:
+
+```bash
+.agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/checkout category/package
+.agents/skills/overlay-tools/bin/qa-ebuild --overlay-path /path/to/checkout --changed-since origin/master --json
+```
+
+By default, `qa-ebuild` reuses the tools `.venv` without downloads or installation.
+It checks local Manifest records, metadata XML, cache presence and ebuild
+fingerprints, and Bash syntax without sourcing package code. Thin Manifests do
+not require local records. In thin mode, an unrecorded AUX file receives path
+validation only, not content or checksum checks. Remote DIST bytes and expanded
+metadata stay unchecked. Exit `0` means the applicable selected local checks
+passed, `1` means findings, and `2` means invalid input, unavailable tools or an
+empty scan.
+
+The `qa-ebuild-info` pre-commit hook displays the actual report but is
+informational. Its wrapper exit `0` is not package PASS. CI uses the same local
+checks as an authoritative gate for changed package inputs. Shared layout,
+profile and eclass changes select all current packages, as does an initial push
+with an all-zero `before` SHA. A tooling-only change prints
+`not applicable: no package targets changed`, never package PASS. Each push has
+its own concurrency group so later pushes do not cancel or replace its diff
+check. Superseded runs for the same PR can still be canceled. Neither integration
+enables pkgcheck. The trusted `--pkgcheck` opt-in can source ebuilds and write
+metadata caches. See [QA contracts and safety](docs/qa-ebuild.md) for coverage,
+selection and the limits of the concurrency policy.
+
 ### Test an exact ebuild in Docker
 
 ```bash
