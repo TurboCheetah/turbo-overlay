@@ -37,6 +37,19 @@ The adapter is not a desktop replacement and must not be bumped from upstream
 runtime releases or nightly tags. Daily and weekly automation schedules remain
 unchanged.
 
+### Create a binary package starter
+
+`bin/create-ebuild` previews an ebuild and metadata XML by default. Read
+[the creator guide and complete preview example](docs/create-ebuild.md#preview-and-write)
+before using its explicit `--write` mode. Required inputs are the exact
+unversioned `category/package`, an existing overlay root via `--overlay-path`,
+`--version`, `--template`, `--upstream-url`, `--license`, `--description`,
+`--homepage`, and `--maintainer-email`.
+It refuses existing packages and performs no downloads,
+Manifest/cache generation or ebuild execution. Generated files still require
+review of source immutability, trusted upstream layout and dependencies. Writes require Linux
+`renameat2(RENAME_NOREPLACE)` support.
+
 ### Bump Package Version
 
 ```bash
