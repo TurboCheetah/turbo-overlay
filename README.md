@@ -55,7 +55,7 @@ For an existing desktop installation:
    adapter install, or repository update automatically uninstalls it.
 
 For an OpenRC-hosted CLI runtime, read the package's
-[`README.gentoo`](dev-util/t3code-openrc/files/README.gentoo) first (once
+[`README.gentoo`](dev-util/t3code-openrc/files/README.gentoo-r4) first (once
 installed, it is `/usr/share/doc/t3code-openrc-*/README.gentoo*`):
 
 1. Review the [upstream CLI installation instructions](https://github.com/pingdotgg/t3code/blob/main/docs/user/install.md#command-line)
@@ -71,17 +71,18 @@ installed, it is `/usr/share/doc/t3code-openrc-*/README.gentoo*`):
    config-protected changes with your usual configuration-update tool rather
    than overwriting local settings. Review any old local OpenRC wrapper before
    switching to the packaged adapter.
-3. As that user, initialize the downloaded exact version. The following is a
-   template, not a command to paste with the placeholder still present:
+3. For a fresh setup with no service state, initialize the downloaded exact
+   version as that user. Substitute your runtime home and version:
 
    ```sh
    T3CODE_HOME='<the absolute path configured as t3code_home>' \
      /usr/libexec/t3code-openrc initialize '<exact version>'
    ```
 
-   Initialize against the same runtime home you configured as `t3code_home`;
-   the service checks state under that exact path and refuses to start
-   without it.
+   For an existing setup, keep the current state. As the service user, run
+   `/usr/libexec/t3code-openrc check` with `T3CODE_HOME` set to the same path
+   configured as `t3code_home`. The adapter accepts protocol-3 and protocol-4
+   state.
 
    Use the exact installed SemVer, not `latest`, a release tag, or a Gentoo
    `_pre` version. Initialization does not download or replace the runtime.

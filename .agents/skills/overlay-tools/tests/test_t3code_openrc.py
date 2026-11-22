@@ -11,9 +11,21 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
 FILES = ROOT / "dev-util/t3code-openrc/files"
-HELPER = FILES / "t3code-openrc"
-INIT = FILES / "t3code.initd"
+HELPER = FILES / "t3code-openrc-r4"
+INIT = FILES / "t3code.initd-r4"
 VERSION = "0.0.46-nightly.202610072774"
+
+UPDATED_VERSION = "0.1.12-nightly.20261120.4994"
+COMMITTED_UPDATE = {
+    "protocol": 4,
+    "activeVersion": UPDATED_VERSION,
+    "update": {
+        "id": "fixture-update",
+        "fromVersion": VERSION,
+        "targetVersion": UPDATED_VERSION,
+        "status": "committed",
+    },
+}
 
 
 @pytest.fixture
@@ -59,9 +71,11 @@ def state(home, value=None):
     return path
 
 
-def test_check_accepts_complete_runtime_without_writes_or_execution(home):
-    runtime(home)
-    state(home)
+@pytest.mark.parametrize("value", [None, COMMITTED_UPDATE], ids=["protocol-3", "protocol-4"])
+def test_check_accepts_complete_runtime_without_writes_or_execution(home, value):
+    version = value["activeVersion"] if value else VERSION
+    runtime(home, version)
+    state(home, value)
     before = {
         p: (p.stat().st_mode, p.stat().st_mtime_ns, p.read_bytes())
         for p in home.rglob("*")
@@ -69,7 +83,7 @@ def test_check_accepts_complete_runtime_without_writes_or_execution(home):
     }
     result = invoke(home, "check")
     assert result.returncode == 0, result.stderr
-    assert VERSION in result.stdout
+    assert result.stdout == version + "\n"
     after = {
         p: (p.stat().st_mode, p.stat().st_mtime_ns, p.read_bytes())
         for p in home.rglob("*")
@@ -102,6 +116,15 @@ def test_check_rejects_damaged_runtime(home, damage):
     else:
         path.write_text("{broken")
     assert invoke(home, "check").returncode != 0
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "01", "+1", ".1", "1."])
+def test_check_rejects_non_json_tokens_accepted_by_jq(home, token):
+    runtime(home, UPDATED_VERSION)
+    path = state(home, COMMITTED_UPDATE)
+    path.write_text(path.read_text().replace('"fixture-update"', token))
+    result = invoke(home, "check")
+    assert result.returncode != 0
 
 
 def recording_runtime(home, version=VERSION):
@@ -138,11 +161,14 @@ def test_run_resolves_active_version_and_sets_safe_environment(home):
     assert env["HOME"] == str(home.parent)
     assert env["PATH"].startswith(str(home.parent / ".local/bin") + ":")
     assert "fixture output" in (home / "userdata/logs/openrc.log").read_text()
-    new_version = "1.2.3+build.4"
-    recording_runtime(home, new_version)
-    path.write_text(json.dumps({"protocol": 3, "activeVersion": new_version}))
+    recording_runtime(home, UPDATED_VERSION)
+    path.write_text(json.dumps(COMMITTED_UPDATE))
+    before = (path.stat().st_mtime_ns, path.read_bytes())
     (home / "runtime/versions" / VERSION / "t3").unlink()
     assert invoke(home, "run").returncode == 0
+    assert (path.stat().st_mtime_ns, path.read_bytes()) == before
+    (home / "runtime/versions" / UPDATED_VERSION / ".install-complete").unlink()
+    assert "incomplete" in invoke(home, "run").stderr
     path.write_text('{"protocol":2,"activeVersion":"1.2.3"}')
     assert invoke(home, "run").returncode != 0
 
@@ -281,8 +307,8 @@ def hook(home, sandbox, action="start_pre", config=None, su_status=0):
 
 
 def test_preflight_uses_fixed_helper_as_service_user_and_exports_launch_environment(home, sandbox):
-    runtime(home)
-    state(home)
+    runtime(home, UPDATED_VERSION)
+    state(home, COMMITTED_UPDATE)
     result, events = hook(home, sandbox, config={"t3code_port": "4321"})
     assert result.returncode == 0, result.stderr
     su = next(event for event in events if event["command"] == "su")
@@ -337,6 +363,7 @@ def test_preflight_refuses_invalid_configuration_before_su(home, sandbox, config
 def test_preflight_propagates_unprivileged_check_failure(home, sandbox):
     result, events = hook(home, sandbox, su_status=17)
     assert result.returncode != 0
+    assert "initialize" not in result.stderr.lower()
     assert any(event["command"] == "su" for event in events)
     assert not (home / "userdata").exists()
 
@@ -428,6 +455,9 @@ def test_proxy_failures_are_bounded_and_propagated(home, sandbox, action, overri
     "value",
     [
         {"protocol": "3", "activeVersion": VERSION},
+        {"protocol": "4", "activeVersion": VERSION},
+        {"protocol": 5, "activeVersion": VERSION},
+        {"protocol": 4, "activeVersion": "nightly"},
         [],
         {"protocol": 3},
         {"protocol": 3, "activeVersion": "1.2.3\n"},

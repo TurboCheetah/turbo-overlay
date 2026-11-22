@@ -1,6 +1,6 @@
 # t3code-openrc design notes
 
-Maintainer notes, not installed. User-facing steps are in `files/README.gentoo`.
+Maintainer notes, not installed. User-facing steps are in `files/README.gentoo-r4`.
 Carried over from the guide this package used to install; not re-audited against the scripts.
 
 - Adapter version `1` is independent of upstream T3 versions. No runtime files
@@ -17,8 +17,11 @@ Carried over from the guide this package used to install; not re-audited against
 - `initialize` requires a non-root uid, validates the executable and matching
   sentinel, and atomically publishes a private protocol-3 state file only if
   none exists (any existing state, including malformed JSON, directories and
-  dangling symlinks, is refused). `check` reads the JSON, exact active version,
-  executable and sentinel; it makes no files and never executes T3.
+  dangling symlinks, is refused). The pinned protocol-4 launcher accepts
+  protocol-3 bootstrap state, so fresh setup also works with protocol-3 runtimes.
+  Both `check` and `run` accept numeric protocol 3 or 4 and validate the exact
+  active version, executable and sentinel. Upstream validates update records
+  and owns state writes. `check` makes no files and never executes T3.
 - Fixed settings: bind `127.0.0.1`, mode `web`, browser opening off,
   working-directory project bootstrap off, T3's internal Tailscale Serve off.
   The same options are exported to preflight and launch.
