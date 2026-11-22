@@ -15,7 +15,7 @@ KEYWORDS="~amd64"
 IUSE="tailscale"
 
 RDEPEND="
-	app-misc/jq
+	app-misc/jq[oniguruma]
 	net-misc/curl
 	sys-apps/coreutils
 	sys-apps/openrc
