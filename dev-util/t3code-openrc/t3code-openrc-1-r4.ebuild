@@ -44,9 +44,9 @@ pkg_postinst() {
 	# never saw it either. Print it once when replacing any of those.
 	#
 	# Accepted trade: a host that installed -1-r2 fresh already saw the doc and
-	# will see it once more on its move to -1-r3. That duplicate is deliberate,
-	# because the ebuild cannot tell the two -1-r2 cohorts apart and a silent gap
-	# is worse than a repeat. Upgrading from -1-r3 or later stays quiet.
+	# sees it again on a direct upgrade to -1-r4. The ebuild cannot tell the two
+	# -1-r2 cohorts apart, so it prefers a repeat to a silent gap. Upgrades
+	# from -1-r3 or later stay quiet.
 	local v
 	for v in ${REPLACING_VERSIONS}; do
 		ver_test "${v}" -le 1-r2 && FORCE_PRINT_ELOG=1

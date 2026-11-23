@@ -29,6 +29,13 @@ complete_runtime() {
 		fail 'runtime is incomplete: sentinel must match version'
 }
 check() {
+	[ ! -L "${state}" ] || fail 'service-state.json must not be a symlink'
+	if [ ! -e "${state}" ]; then
+		runtime_dir=${state%/*}
+		[ -d "${runtime_dir}" ] && [ -r "${runtime_dir}" ] && [ -x "${runtime_dir}" ] ||
+			fail 'runtime directory is missing or inaccessible'
+		fail 'state is missing. For a fresh setup only, run initialize EXACT_VERSION as the service user'
+	fi
 	# jq -s on a FIFO would block forever and hang OpenRC's preflight.
 	[ -f "${state}" ] || fail 'state must be a regular file'
 	version=$(jq -Rser --arg pattern "${semver}" '
