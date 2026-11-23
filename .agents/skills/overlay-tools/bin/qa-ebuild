@@ -1,0 +1,96 @@
+#!/usr/bin/env -S python3 -I -S -B
+"""Isolated stdlib bootstrap. Invoke directly, never through Bash."""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+TOOLS = Path(__file__).resolve().parent.parent
+PYTHON = TOOLS / ".venv/bin/python"
+
+
+def requested(flag: str) -> bool:
+    """Recover exact options, not filenames or option values, before CLI startup."""
+    needs_value = False
+    for argument in sys.argv[1:]:
+        if argument == "--":
+            break
+        if needs_value:
+            needs_value = False
+        elif argument in {"--overlay-path", "--changed-since"}:
+            needs_value = True
+        elif argument == flag:
+            return True
+    return False
+
+
+if not os.access(PYTHON, os.X_OK):
+    message = (
+        "overlay-tools .venv is missing; initialize explicitly with uv sync --locked --group dev"
+    )
+    if requested("--json"):
+        print(
+            json.dumps(
+                {
+                    "status": "INCONCLUSIVE",
+                    "examined_count": 0,
+                    "packages": [],
+                    "selected_count": 0,
+                    "selected_packages": [],
+                    "package_coverage": {},
+                    "inconclusive": True,
+                    "findings": [
+                        {
+                            "check": "input_environment",
+                            "path": "",
+                            "severity": "error",
+                            "message": message,
+                        }
+                    ],
+                    "skipped": [
+                        {
+                            "check": "remote_dist",
+                            "reason": "DIST bytes are not fetched or verified",
+                        },
+                        {
+                            "check": "bash_metadata",
+                            "reason": "No sourcing or expansion of SRC_URI or eclasses",
+                        },
+                        {"check": "pkgcheck", "reason": "Not requested; use --pkgcheck explicitly"},
+                    ],
+                    "coverage": {
+                        "remote_dist": "unchecked",
+                        "bash_metadata": "unchecked",
+                        "manifest_local": "not-run",
+                        "metadata_xml": "not-run",
+                        "cache": "not-run",
+                        "bash_syntax": "not-run",
+                        "ebuild_advisory": "not-run",
+                        "pkgcheck": "not-run",
+                    },
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    sys.exit(2)
+
+# The host bootstrap skips site initialization too. Only the explicitly trusted
+# provisioned environment initializes site hooks. Source and arguments are argv.
+os.execv(
+    str(PYTHON),
+    [
+        str(PYTHON),
+        "-I",
+        "-B",
+        "-c",
+        (
+            "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+            'runpy.run_module("overlay_tools.cli.qa_ebuild",run_name="__main__",alter_sys=True)'
+        ),
+        str(TOOLS / "src"),
+        *sys.argv[1:],
+    ],
+)
